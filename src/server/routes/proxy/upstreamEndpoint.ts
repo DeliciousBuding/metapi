@@ -2,6 +2,7 @@ import { fetchModelPricingCatalog } from '../../services/modelPricingService.js'
 import type { DownstreamFormat } from './chatFormats.js';
 
 export type UpstreamEndpoint = 'chat' | 'messages' | 'responses';
+export type EndpointPreference = DownstreamFormat | 'responses';
 
 type ChannelContext = {
   site: {
@@ -25,8 +26,148 @@ function asTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function headerValueToString(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item !== 'string') continue;
+      const trimmed = item.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+
+  return null;
+}
+
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+const BLOCKED_PASSTHROUGH_HEADERS = new Set([
+  'host',
+  'content-length',
+  'accept-encoding',
+  'cookie',
+  'authorization',
+  'x-api-key',
+  'x-goog-api-key',
+  'sec-websocket-key',
+  'sec-websocket-version',
+  'sec-websocket-extensions',
+]);
+
+function shouldSkipPassthroughHeader(key: string): boolean {
+  return HOP_BY_HOP_HEADERS.has(key) || BLOCKED_PASSTHROUGH_HEADERS.has(key);
+}
+
+function extractSafePassthroughHeaders(
+  headers?: Record<string, unknown>,
+): Record<string, string> {
+  if (!headers) return {};
+
+  const forwarded: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(headers)) {
+    const key = rawKey.toLowerCase();
+    if (!key || shouldSkipPassthroughHeader(key)) continue;
+
+    const value = headerValueToString(rawValue);
+    if (!value) continue;
+    forwarded[key] = value;
+  }
+
+  return forwarded;
+}
+
+function extractClaudePassthroughHeaders(
+  headers?: Record<string, unknown>,
+): Record<string, string> {
+  if (!headers) return {};
+
+  const forwarded: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(headers)) {
+    const key = rawKey.toLowerCase();
+    const shouldForward = (
+      key.startsWith('anthropic-')
+      || key.startsWith('x-claude-')
+      || key.startsWith('x-stainless-')
+    );
+    if (!shouldForward) continue;
+
+    const value = headerValueToString(rawValue);
+    if (!value) continue;
+    forwarded[key] = value;
+  }
+
+  return forwarded;
+}
+
+function extractResponsesPassthroughHeaders(
+  headers?: Record<string, unknown>,
+): Record<string, string> {
+  if (!headers) return {};
+
+  const forwarded: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(headers)) {
+    const key = rawKey.toLowerCase();
+    const shouldForward = (
+      key.startsWith('openai-')
+      || key.startsWith('x-openai-')
+      || key.startsWith('x-stainless-')
+      || key.startsWith('chatgpt-')
+      || key === 'originator'
+    );
+    if (!shouldForward) continue;
+
+    const value = headerValueToString(rawValue);
+    if (!value) continue;
+    forwarded[key] = value;
+  }
+
+  return forwarded;
+}
+
+function ensureStreamAcceptHeader(
+  headers: Record<string, string>,
+  stream: boolean,
+): Record<string, string> {
+  if (!stream) return headers;
+
+  const existingAccept = (
+    headerValueToString(headers.accept)
+    || headerValueToString((headers as Record<string, unknown>).Accept)
+  );
+  if (existingAccept) return headers;
+
+  return {
+    ...headers,
+    accept: 'text/event-stream',
+  };
+}
+
 function toFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function sanitizeMessagesBodyForAnthropic(body: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = { ...body };
+  const hasTemperature = toFiniteNumber(sanitized.temperature) !== null;
+  const hasTopP = toFiniteNumber(sanitized.top_p) !== null;
+  // Some Anthropic-compatible upstreams reject requests carrying both fields.
+  if (hasTemperature && hasTopP) {
+    delete sanitized.top_p;
+  }
+  return sanitized;
 }
 
 function normalizeContentText(content: unknown): string {
@@ -173,8 +314,7 @@ function normalizeEndpointTypes(value: unknown): UpstreamEndpoint[] {
     || raw === 'responses'
     || raw.includes('response')
   ) {
-    // Treat responses family as OpenAI-compatible for upstream selection.
-    normalized.add('chat');
+    normalized.add('responses');
   }
 
   if (
@@ -191,12 +331,17 @@ function normalizeEndpointTypes(value: unknown): UpstreamEndpoint[] {
   // Some upstreams return protocol families instead of concrete endpoint paths.
   if (raw === 'openai' || raw.includes('openai')) {
     normalized.add('chat');
+    normalized.add('responses');
   }
 
   return Array.from(normalized);
 }
 
-function preferredEndpointOrder(downstreamFormat: DownstreamFormat): UpstreamEndpoint[] {
+function preferredEndpointOrder(downstreamFormat: EndpointPreference): UpstreamEndpoint[] {
+  if (downstreamFormat === 'responses') {
+    return ['responses', 'chat', 'messages'];
+  }
+
   return downstreamFormat === 'claude'
     ? ['messages', 'chat']
     : ['chat', 'messages'];
@@ -205,11 +350,13 @@ function preferredEndpointOrder(downstreamFormat: DownstreamFormat): UpstreamEnd
 export async function resolveUpstreamEndpointCandidates(
   context: ChannelContext,
   modelName: string,
-  downstreamFormat: DownstreamFormat,
+  downstreamFormat: EndpointPreference,
 ): Promise<UpstreamEndpoint[]> {
   if ((context.site.platform || '').toLowerCase() === 'anyrouter') {
     // anyrouter deployments are effectively anthropic-protocol first.
-    return ['messages', 'chat'];
+    return downstreamFormat === 'responses'
+      ? ['responses', 'messages', 'chat']
+      : ['messages', 'chat'];
   }
 
   const preferred = preferredEndpointOrder(downstreamFormat);
@@ -269,39 +416,86 @@ export function buildUpstreamEndpointRequest(input: {
   stream: boolean;
   tokenValue: string;
   openaiBody: Record<string, unknown>;
+  downstreamFormat: EndpointPreference;
+  claudeOriginalBody?: Record<string, unknown>;
+  responsesOriginalBody?: Record<string, unknown>;
+  downstreamHeaders?: Record<string, unknown>;
 }): {
   path: string;
   headers: Record<string, string>;
   body: Record<string, unknown>;
 } {
+  const passthroughHeaders = extractSafePassthroughHeaders(input.downstreamHeaders);
   const commonHeaders = {
+    ...passthroughHeaders,
     'Content-Type': 'application/json',
     Authorization: `Bearer ${input.tokenValue}`,
   };
 
   if (input.endpoint === 'messages') {
+    const claudeHeaders = input.downstreamFormat === 'claude'
+      ? extractClaudePassthroughHeaders(input.downstreamHeaders)
+      : {};
+    const anthropicVersion = (
+      claudeHeaders['anthropic-version']
+      || passthroughHeaders['anthropic-version']
+      || '2023-06-01'
+    );
+    const body = (
+      input.downstreamFormat === 'claude' && input.claudeOriginalBody
+        ? {
+          ...input.claudeOriginalBody,
+          model: input.modelName,
+          stream: input.stream,
+        }
+        : convertOpenAiBodyToMessagesBody(input.openaiBody, input.modelName, input.stream)
+    );
+    const sanitizedBody = sanitizeMessagesBodyForAnthropic(body);
+
+    const headers = ensureStreamAcceptHeader({
+      ...commonHeaders,
+      ...claudeHeaders,
+      'x-api-key': input.tokenValue,
+      'anthropic-version': anthropicVersion,
+    }, input.stream);
+
     return {
       path: '/v1/messages',
-      headers: {
-        ...commonHeaders,
-        'x-api-key': input.tokenValue,
-        'anthropic-version': '2023-06-01',
-      },
-      body: convertOpenAiBodyToMessagesBody(input.openaiBody, input.modelName, input.stream),
+      headers,
+      body: sanitizedBody,
     };
   }
 
   if (input.endpoint === 'responses') {
+    const responsesHeaders = input.downstreamFormat === 'responses'
+      ? extractResponsesPassthroughHeaders(input.downstreamHeaders)
+      : {};
+    const body = (
+      input.downstreamFormat === 'responses' && input.responsesOriginalBody
+        ? {
+          ...input.responsesOriginalBody,
+          model: input.modelName,
+          stream: input.stream,
+        }
+        : convertOpenAiBodyToResponsesBody(input.openaiBody, input.modelName, input.stream)
+    );
+
+    const headers = ensureStreamAcceptHeader({
+      ...commonHeaders,
+      ...responsesHeaders,
+    }, input.stream);
+
     return {
       path: '/v1/responses',
-      headers: commonHeaders,
-      body: convertOpenAiBodyToResponsesBody(input.openaiBody, input.modelName, input.stream),
+      headers,
+      body,
     };
   }
 
+  const headers = ensureStreamAcceptHeader(commonHeaders, input.stream);
   return {
     path: '/v1/chat/completions',
-    headers: commonHeaders,
+    headers,
     body: {
       ...input.openaiBody,
       model: input.modelName,

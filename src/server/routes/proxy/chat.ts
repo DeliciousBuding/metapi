@@ -29,9 +29,70 @@ import {
 } from './upstreamEndpoint.js';
 
 const MAX_RETRIES = 2;
+const CLAUDE_SSE_EVENT_NAMES = new Set([
+  'message_start',
+  'content_block_start',
+  'content_block_delta',
+  'content_block_stop',
+  'message_delta',
+  'message_stop',
+  'ping',
+  'error',
+]);
 
 function withUpstreamPath(path: string, message: string): string {
   return `[upstream:${path}] ${message}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object';
+}
+
+function isClaudeSseEventName(value: unknown): value is string {
+  return typeof value === 'string' && CLAUDE_SSE_EVENT_NAMES.has(value);
+}
+
+function serializeRawSseEvent(event: string, data: string): string {
+  const dataLines = data.split('\n').map((line) => `data: ${line}`).join('\n');
+  if (event) {
+    return `event: ${event}\n${dataLines}\n\n`;
+  }
+  return `${dataLines}\n\n`;
+}
+
+function syncClaudeStreamStateFromRawEvent(
+  eventName: string,
+  parsedPayload: unknown,
+  streamContext: { id: string; model: string },
+  claudeContext: { messageStarted: boolean; contentBlockStarted: boolean; doneSent: boolean },
+) {
+  if (eventName === 'message_start') {
+    claudeContext.messageStarted = true;
+    if (isRecord(parsedPayload) && isRecord(parsedPayload.message)) {
+      const message = parsedPayload.message;
+      if (typeof message.id === 'string' && message.id.trim().length > 0) {
+        streamContext.id = message.id;
+      }
+      if (typeof message.model === 'string' && message.model.trim().length > 0) {
+        streamContext.model = message.model;
+      }
+    }
+    return;
+  }
+
+  if (eventName === 'content_block_start') {
+    claudeContext.contentBlockStarted = true;
+    return;
+  }
+
+  if (eventName === 'content_block_stop') {
+    claudeContext.contentBlockStarted = false;
+    return;
+  }
+
+  if (eventName === 'message_stop') {
+    claudeContext.doneSent = true;
+  }
 }
 
 export async function chatProxyRoute(app: FastifyInstance) {
@@ -54,7 +115,7 @@ async function handleChatProxyRequest(
     return reply.code(parsedRequest.error.statusCode).send(parsedRequest.error.payload);
   }
 
-  const { requestedModel, isStream, upstreamBody } = parsedRequest.value!;
+  const { requestedModel, isStream, upstreamBody, claudeOriginalBody } = parsedRequest.value!;
 
   const excludeChannelIds: number[] = [];
   let retryCount = 0;
@@ -105,6 +166,9 @@ async function handleChatProxyRequest(
           stream: isStream,
           tokenValue: selected.tokenValue,
           openaiBody: upstreamBody,
+          downstreamFormat,
+          claudeOriginalBody,
+          downstreamHeaders: request.headers as Record<string, unknown>,
         });
 
         const targetUrl = `${selected.site.url}${endpointRequest.path}`;
@@ -312,6 +376,27 @@ async function handleChatProxyRequest(
 
             if (parsedPayload && typeof parsedPayload === 'object') {
               parsedUsage = mergeProxyUsage(parsedUsage, parseProxyUsage(parsedPayload));
+
+              if (downstreamFormat === 'claude') {
+                const payloadType = (isRecord(parsedPayload) && typeof parsedPayload.type === 'string')
+                  ? parsedPayload.type
+                  : '';
+                const claudeEventName = isClaudeSseEventName(eventBlock.event)
+                  ? eventBlock.event
+                  : (isClaudeSseEventName(payloadType) ? payloadType : '');
+
+                if (claudeEventName) {
+                  syncClaudeStreamStateFromRawEvent(
+                    claudeEventName,
+                    parsedPayload,
+                    streamContext,
+                    claudeContext,
+                  );
+                  reply.raw.write(serializeRawSseEvent(claudeEventName, eventBlock.data));
+                  continue;
+                }
+              }
+
               const normalizedEvent = normalizeUpstreamStreamEvent(parsedPayload, streamContext, modelName);
               writeLines(serializeNormalizedStreamEvent(
                 downstreamFormat,

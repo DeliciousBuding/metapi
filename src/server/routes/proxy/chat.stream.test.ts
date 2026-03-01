@@ -338,6 +338,155 @@ describe('chat proxy stream behavior', () => {
     expect(response.body).toContain('event: message_stop');
   });
 
+  it('converts OpenAI tool_calls SSE into Claude tool_use stream events on /v1/messages', async () => {
+    const encoder = new TextEncoder();
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-tool","model":"claude-opus-4-6","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-tool","model":"claude-opus-4-6","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_glob","type":"function","function":{"name":"Glob","arguments":""}}]},"finish_reason":null}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-tool","model":"claude-opus-4-6","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"pattern\\":\\"README*\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValue(new Response(upstreamBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        model: 'claude-opus-4-6',
+        stream: true,
+        max_tokens: 256,
+        messages: [{ role: 'user', content: 'find readme files' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/event-stream');
+    expect(response.body).toContain('event: content_block_start');
+    expect(response.body).toContain('"type":"tool_use"');
+    expect(response.body).toContain('"name":"Glob"');
+    expect(response.body).toContain('"type":"input_json_delta"');
+    expect(response.body).toContain('"partial_json":"{\\"pattern\\":\\"README*\\"}"');
+    expect(response.body).toContain('"stop_reason":"tool_use"');
+  });
+
+  it('keeps final content when upstream chunk carries both delta and finish_reason on /v1/messages', async () => {
+    const encoder = new TextEncoder();
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-2","model":"claude-opus-4-6","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-2","model":"claude-opus-4-6","choices":[{"delta":{"content":"tail-token"},"finish_reason":"stop"}]}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValue(new Response(upstreamBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        model: 'claude-opus-4-6',
+        stream: true,
+        max_tokens: 256,
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('event: content_block_delta');
+    expect(response.body).toContain('\"text\":\"tail-token\"');
+    expect(response.body).toContain('event: message_stop');
+  });
+
+  it('preserves Claude-specific payload fields and forwards claude headers on /v1/messages', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      id: 'msg_headers',
+      type: 'message',
+      model: 'claude-opus-4-6',
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      headers: {
+        'anthropic-beta': 'code-2025-09-30',
+        'x-claude-client': 'claude-code',
+      },
+      payload: {
+        model: 'claude-opus-4-6',
+        max_tokens: 256,
+        messages: [{ role: 'user', content: 'hello' }],
+        metadata: { session_id: 'abc123' },
+        thinking: { type: 'enabled', budget_tokens: 1024 },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const [_targetUrl, options] = fetchMock.mock.calls[0] as [string, any];
+    expect(options.headers['anthropic-beta']).toBe('code-2025-09-30');
+    expect(options.headers['x-claude-client']).toBe('claude-code');
+
+    const forwardedBody = JSON.parse(options.body);
+    expect(forwardedBody.metadata).toEqual({ session_id: 'abc123' });
+    expect(forwardedBody.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 });
+  });
+
+  it('passes through Claude tool_use SSE events on /v1/messages for CLI tool execution', async () => {
+    const encoder = new TextEncoder();
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_tool_1","model":"claude-opus-4-6","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\n'));
+        controller.enqueue(encoder.encode('event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"Glob","input":{}}}\n\n'));
+        controller.enqueue(encoder.encode('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"pattern\\":\\"README*\\"}"}}\n\n'));
+        controller.enqueue(encoder.encode('event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'));
+        controller.enqueue(encoder.encode('event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":6}}\n\n'));
+        controller.enqueue(encoder.encode('event: message_stop\ndata: {"type":"message_stop"}\n\n'));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValue(new Response(upstreamBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        model: 'claude-opus-4-6',
+        stream: true,
+        max_tokens: 256,
+        messages: [{ role: 'user', content: 'find readme files' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/event-stream');
+    expect(response.body).toContain('event: content_block_start');
+    expect(response.body).toContain('"type":"tool_use"');
+    expect(response.body).toContain('"name":"Glob"');
+    expect(response.body).toContain('"partial_json":"{\\"pattern\\":\\"README*\\"}"');
+    expect(response.body).toContain('event: message_stop');
+  });
+
   it('serves /v1/responses via protocol translation when upstream is OpenAI-compatible', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({
       id: 'resp_123',
@@ -365,9 +514,10 @@ describe('chat proxy stream behavior', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [targetUrl, options] = fetchMock.mock.calls[0] as [string, any];
-    expect(targetUrl).toContain('/v1/chat/completions');
+    expect(targetUrl).toContain('/v1/responses');
     const forwarded = JSON.parse(options.body);
     expect(forwarded.model).toBe('upstream-gpt');
+    expect(forwarded.input).toBe('hello');
   });
 
   it('passes through /v1/responses SSE payloads', async () => {
@@ -399,6 +549,168 @@ describe('chat proxy stream behavior', () => {
     expect(response.headers['content-type']).toContain('text/event-stream');
     expect(response.body).toContain('response.output_text.delta');
     expect(response.body).toContain('[DONE]');
+  });
+
+  it('converts chat-completions SSE to Responses stream events for /v1/responses clients', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'upstream-gpt',
+          supportedEndpointTypes: ['/v1/chat/completions'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    const encoder = new TextEncoder();
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-r1","model":"upstream-gpt","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-r1","model":"upstream-gpt","choices":[{"delta":{"content":"hello"},"finish_reason":null}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-r1","model":"upstream-gpt","choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValue(new Response(upstreamBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/responses',
+      payload: {
+        model: 'gpt-5.2',
+        input: 'hello',
+        stream: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/event-stream');
+    expect(response.body).toContain('response.output_item.added');
+    expect(response.body).toContain('response.output_text.delta');
+    expect(response.body).toContain('response.completed');
+    expect(response.body).toContain('[DONE]');
+  });
+
+  it('converts chat tool_calls SSE to Responses function_call events on /v1/responses', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'upstream-gpt',
+          supportedEndpointTypes: ['/v1/chat/completions'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    const encoder = new TextEncoder();
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-r2","model":"upstream-gpt","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-r2","model":"upstream-gpt","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"Glob","arguments":""}}]},"finish_reason":null}]}\n\n'));
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-r2","model":"upstream-gpt","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"pattern\\":\\"README*\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValue(new Response(upstreamBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/responses',
+      payload: {
+        model: 'gpt-5.2',
+        input: 'find readme',
+        stream: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('"type":"function_call"');
+    expect(response.body).toContain('response.function_call_arguments.delta');
+    expect(response.body).toContain('"name":"Glob"');
+    expect(response.body).toContain('"delta":"{\\"pattern\\":\\"README*\\"}"');
+    expect(response.body).toContain('response.completed');
+  });
+
+  it('preserves Responses-specific payload fields and forwards openai headers on /v1/responses', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      id: 'resp_passthrough',
+      object: 'response',
+      status: 'completed',
+      model: 'upstream-gpt',
+      output_text: 'ok',
+      output: [],
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/responses',
+      headers: {
+        'openai-beta': 'responses-2025-03-11',
+        'x-stainless-lang': 'typescript',
+        originator: 'codex_cli_rs',
+      },
+      payload: {
+        model: 'gpt-5.2',
+        input: 'hello',
+        metadata: { session_id: 'abc123' },
+        reasoning: { effort: 'high' },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const [_targetUrl, options] = fetchMock.mock.calls[0] as [string, any];
+    expect(options.headers['openai-beta']).toBe('responses-2025-03-11');
+    expect(options.headers['x-stainless-lang']).toBe('typescript');
+    expect(options.headers.originator).toBe('codex_cli_rs');
+
+    const forwardedBody = JSON.parse(options.body);
+    expect(forwardedBody.metadata).toEqual({ session_id: 'abc123' });
+    expect(forwardedBody.reasoning).toEqual({ effort: 'high' });
+  });
+
+  it('sets stream accept header for /v1/responses when downstream omits accept', async () => {
+    const encoder = new TextEncoder();
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_accept","model":"upstream-gpt","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValue(new Response(upstreamBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/responses',
+      payload: {
+        model: 'gpt-5.2',
+        input: 'hello',
+        stream: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const [_targetUrl, options] = fetchMock.mock.calls[0] as [string, any];
+    expect(options.headers.accept).toBe('text/event-stream');
   });
 
   it('routes /v1/responses to /v1/messages when upstream catalog is anthropic-only', async () => {

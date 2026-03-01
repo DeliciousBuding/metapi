@@ -11,18 +11,33 @@ export type StreamTransformContext = {
   created: number;
   roleSent: boolean;
   doneSent: boolean;
+  toolCalls: Record<number, { id?: string; name?: string }>;
 };
 
 export type ClaudeDownstreamContext = {
   messageStarted: boolean;
   contentBlockStarted: boolean;
   doneSent: boolean;
+  textBlockIndex: number | null;
+  nextContentBlockIndex: number;
+  toolBlocks: Record<number, {
+    contentIndex: number;
+    id: string;
+    name: string;
+    open: boolean;
+  }>;
 };
 
 export type NormalizedStreamEvent = {
   role?: 'assistant';
   contentDelta?: string;
   reasoningDelta?: string;
+  toolCallDeltas?: Array<{
+    index: number;
+    id?: string;
+    name?: string;
+    argumentsDelta?: string;
+  }>;
   finishReason?: string | null;
   done?: boolean;
 };
@@ -40,6 +55,7 @@ export type ParsedDownstreamChatRequest = {
   requestedModel: string;
   isStream: boolean;
   upstreamBody: Record<string, unknown>;
+  claudeOriginalBody?: Record<string, unknown>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -182,6 +198,7 @@ export function createStreamTransformContext(modelName: string): StreamTransform
     created: Math.floor(Date.now() / 1000),
     roleSent: false,
     doneSent: false,
+    toolCalls: {},
   };
 }
 
@@ -190,6 +207,9 @@ export function createClaudeDownstreamContext(): ClaudeDownstreamContext {
     messageStarted: false,
     contentBlockStarted: false,
     doneSent: false,
+    textBlockIndex: null,
+    nextContentBlockIndex: 0,
+    toolBlocks: {},
   };
 }
 
@@ -355,6 +375,7 @@ export function parseDownstreamChatRequest(
         requestedModel: converted.model,
         isStream: converted.stream,
         upstreamBody: converted.payload,
+        claudeOriginalBody: raw,
       },
     };
   }
@@ -498,10 +519,43 @@ export function normalizeUpstreamStreamEvent(
       || deltaParsed.reasoning
       || '';
 
+    const rawToolCalls = Array.isArray((delta as any).tool_calls)
+      ? ((delta as any).tool_calls as unknown[])
+      : [];
+    const toolCallDeltas = rawToolCalls
+      .map((item, itemIndex) => {
+        if (!isRecord(item)) return null;
+        const functionPart = isRecord(item.function) ? item.function : {};
+        const index = (
+          typeof item.index === 'number' && Number.isFinite(item.index)
+            ? Math.max(0, Math.trunc(item.index))
+            : itemIndex
+        );
+        const id = typeof item.id === 'string' && item.id.trim().length > 0
+          ? item.id
+          : undefined;
+        const name = typeof functionPart.name === 'string' && functionPart.name.trim().length > 0
+          ? functionPart.name
+          : undefined;
+        const argumentsDelta = typeof functionPart.arguments === 'string'
+          ? functionPart.arguments
+          : undefined;
+
+        if (!id && !name && argumentsDelta === undefined) return null;
+        return {
+          index,
+          id,
+          name,
+          argumentsDelta,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item);
+
     return {
       role: (delta as any).role === 'assistant' ? 'assistant' : undefined,
       contentDelta: contentDelta || undefined,
       reasoningDelta: reasoningDelta || undefined,
+      toolCallDeltas: toolCallDeltas.length > 0 ? toolCallDeltas : undefined,
       finishReason: normalizeStopReason(choice?.finish_reason),
     };
   }
@@ -539,6 +593,42 @@ export function normalizeUpstreamStreamEvent(
   }
 
   if (type === 'content_block_start') {
+    const index = (
+      typeof (payload as any).index === 'number' && Number.isFinite((payload as any).index)
+        ? Math.max(0, Math.trunc((payload as any).index))
+        : 0
+    );
+    const contentBlock = isRecord(payload.content_block) ? payload.content_block : {};
+    if (contentBlock.type === 'tool_use') {
+      const id = typeof contentBlock.id === 'string' && contentBlock.id.trim().length > 0
+        ? contentBlock.id
+        : undefined;
+      const name = typeof contentBlock.name === 'string' && contentBlock.name.trim().length > 0
+        ? contentBlock.name
+        : undefined;
+      let argumentsDelta: string | undefined;
+      const rawInput = contentBlock.input;
+      if (typeof rawInput === 'string') {
+        argumentsDelta = rawInput;
+      } else if (Array.isArray(rawInput) || isRecord(rawInput)) {
+        try {
+          const serialized = JSON.stringify(rawInput);
+          if (serialized && serialized !== '{}' && serialized !== '[]') {
+            argumentsDelta = serialized;
+          }
+        } catch {}
+      }
+
+      return {
+        toolCallDeltas: [{
+          index,
+          id,
+          name,
+          argumentsDelta,
+        }],
+      };
+    }
+
     const parsed = extractTextAndReasoning(payload.content_block);
     return {
       contentDelta: parsed.content || undefined,
@@ -550,6 +640,23 @@ export function normalizeUpstreamStreamEvent(
     const delta = isRecord(payload.delta) ? payload.delta : {};
     const deltaType = typeof delta.type === 'string' ? delta.type : '';
     const parsed = extractTextAndReasoning(delta);
+
+    if (deltaType === 'input_json_delta') {
+      const index = (
+        typeof (payload as any).index === 'number' && Number.isFinite((payload as any).index)
+          ? Math.max(0, Math.trunc((payload as any).index))
+          : 0
+      );
+      const partialJson = typeof (delta as any).partial_json === 'string'
+        ? (delta as any).partial_json
+        : undefined;
+      return {
+        toolCallDeltas: [{
+          index,
+          argumentsDelta: partialJson,
+        }],
+      };
+    }
 
     if (deltaType === 'thinking_delta') {
       return {
@@ -626,6 +733,34 @@ function buildOpenAiStreamChunk(
     delta.reasoning_content = event.reasoningDelta;
   }
 
+  if (Array.isArray(event.toolCallDeltas) && event.toolCallDeltas.length > 0) {
+    const toolCalls = event.toolCallDeltas.map((toolDelta) => {
+      const index = Number.isFinite(toolDelta.index) ? Math.max(0, Math.trunc(toolDelta.index)) : 0;
+      const existing = context.toolCalls[index] || {};
+      const id = toolDelta.id || existing.id || `call_meta_${index}`;
+      const name = toolDelta.name || existing.name || '';
+      context.toolCalls[index] = {
+        id,
+        name: name || existing.name,
+      };
+
+      const fn: Record<string, unknown> = {};
+      if (name) fn.name = name;
+      if (toolDelta.argumentsDelta !== undefined) fn.arguments = toolDelta.argumentsDelta;
+
+      return {
+        index,
+        id,
+        type: 'function',
+        function: fn,
+      };
+    });
+
+    if (toolCalls.length > 0) {
+      delta.tool_calls = toolCalls;
+    }
+  }
+
   // Some OpenAI-compatible clients (e.g. OpenWebUI) expect starter chunk to include empty content.
   if (isInitialAssistantRoleOnlyEvent) {
     delta.content = '';
@@ -675,20 +810,110 @@ function ensureClaudeStartEvents(
   return [serializeSse('message_start', payload)];
 }
 
-function ensureClaudeContentBlockStart(
+function ensureClaudeTextBlockStart(
   claudeContext: ClaudeDownstreamContext,
 ): string[] {
-  if (claudeContext.contentBlockStarted) return [];
+  if (claudeContext.contentBlockStarted && claudeContext.textBlockIndex !== null) return [];
+  const contentIndex = claudeContext.nextContentBlockIndex;
+  claudeContext.nextContentBlockIndex += 1;
   claudeContext.contentBlockStarted = true;
+  claudeContext.textBlockIndex = contentIndex;
 
   return [serializeSse('content_block_start', {
     type: 'content_block_start',
-    index: 0,
+    index: contentIndex,
     content_block: {
       type: 'text',
       text: '',
     },
   })];
+}
+
+function closeClaudeTextBlock(
+  claudeContext: ClaudeDownstreamContext,
+): string[] {
+  if (!claudeContext.contentBlockStarted || claudeContext.textBlockIndex === null) return [];
+
+  const contentIndex = claudeContext.textBlockIndex;
+  claudeContext.contentBlockStarted = false;
+  claudeContext.textBlockIndex = null;
+  return [serializeSse('content_block_stop', {
+    type: 'content_block_stop',
+    index: contentIndex,
+  })];
+}
+
+function normalizeToolContentIndex(raw: unknown): number {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return Math.max(0, Math.trunc(raw));
+  }
+  return 0;
+}
+
+function ensureClaudeToolBlockStart(
+  claudeContext: ClaudeDownstreamContext,
+  toolDelta: NonNullable<NormalizedStreamEvent['toolCallDeltas']>[number],
+): { events: string[]; contentIndex: number } {
+  const toolSlot = normalizeToolContentIndex(toolDelta.index);
+  let state = claudeContext.toolBlocks[toolSlot];
+  if (!state) {
+    const fallbackId = `toolu_meta_${toolSlot}`;
+    const fallbackName = `tool_${toolSlot}`;
+    state = {
+      contentIndex: claudeContext.nextContentBlockIndex,
+      id: toolDelta.id || fallbackId,
+      name: toolDelta.name || fallbackName,
+      open: false,
+    };
+    claudeContext.nextContentBlockIndex += 1;
+    claudeContext.toolBlocks[toolSlot] = state;
+  } else {
+    if (toolDelta.id && state.id !== toolDelta.id) {
+      state.id = toolDelta.id;
+    }
+    if (toolDelta.name && state.name !== toolDelta.name) {
+      state.name = toolDelta.name;
+    }
+  }
+
+  const events: string[] = [];
+  if (!state.open) {
+    state.open = true;
+    events.push(serializeSse('content_block_start', {
+      type: 'content_block_start',
+      index: state.contentIndex,
+      content_block: {
+        type: 'tool_use',
+        id: state.id,
+        name: state.name,
+        input: {},
+      },
+    }));
+  }
+
+  return {
+    events,
+    contentIndex: state.contentIndex,
+  };
+}
+
+function closeClaudeToolBlocks(
+  claudeContext: ClaudeDownstreamContext,
+): string[] {
+  const openBlocks = Object.values(claudeContext.toolBlocks)
+    .filter((item) => item.open)
+    .sort((a, b) => a.contentIndex - b.contentIndex);
+  if (openBlocks.length <= 0) return [];
+
+  const events: string[] = [];
+  for (const block of openBlocks) {
+    block.open = false;
+    events.push(serializeSse('content_block_stop', {
+      type: 'content_block_stop',
+      index: block.contentIndex,
+    }));
+  }
+  return events;
 }
 
 function buildClaudeDoneEvents(
@@ -701,13 +926,8 @@ function buildClaudeDoneEvents(
   const events: string[] = [];
   events.push(...ensureClaudeStartEvents(context, claudeContext));
 
-  if (claudeContext.contentBlockStarted) {
-    events.push(serializeSse('content_block_stop', {
-      type: 'content_block_stop',
-      index: 0,
-    }));
-    claudeContext.contentBlockStarted = false;
-  }
+  events.push(...closeClaudeTextBlock(claudeContext));
+  events.push(...closeClaudeToolBlocks(claudeContext));
 
   events.push(serializeSse('message_delta', {
     type: 'message_delta',
@@ -736,10 +956,6 @@ export function serializeNormalizedStreamEvent(
     return chunk ? [serializeSse('', chunk)] : [];
   }
 
-  if (event.done || event.finishReason) {
-    return buildClaudeDoneEvents(context, claudeContext, event.finishReason);
-  }
-
   const events: string[] = [];
   if (event.role === 'assistant' || event.contentDelta || event.reasoningDelta) {
     events.push(...ensureClaudeStartEvents(context, claudeContext));
@@ -750,16 +966,40 @@ export function serializeNormalizedStreamEvent(
     event.contentDelta || '',
   ]);
 
+  if (Array.isArray(event.toolCallDeltas) && event.toolCallDeltas.length > 0) {
+    events.push(...closeClaudeTextBlock(claudeContext));
+    for (const toolDelta of event.toolCallDeltas) {
+      const toolBlock = ensureClaudeToolBlockStart(claudeContext, toolDelta);
+      events.push(...toolBlock.events);
+
+      if (toolDelta.argumentsDelta !== undefined && toolDelta.argumentsDelta.length > 0) {
+        events.push(serializeSse('content_block_delta', {
+          type: 'content_block_delta',
+          index: toolBlock.contentIndex,
+          delta: {
+            type: 'input_json_delta',
+            partial_json: toolDelta.argumentsDelta,
+          },
+        }));
+      }
+    }
+  }
+
   if (mergedText) {
-    events.push(...ensureClaudeContentBlockStart(claudeContext));
+    events.push(...closeClaudeToolBlocks(claudeContext));
+    events.push(...ensureClaudeTextBlockStart(claudeContext));
     events.push(serializeSse('content_block_delta', {
       type: 'content_block_delta',
-      index: 0,
+      index: claudeContext.textBlockIndex ?? 0,
       delta: {
         type: 'text_delta',
         text: mergedText,
       },
     }));
+  }
+
+  if (event.done || event.finishReason) {
+    events.push(...buildClaudeDoneEvents(context, claudeContext, event.finishReason));
   }
 
   return events;

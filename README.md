@@ -31,6 +31,11 @@
 </p>
 
 <p align="center">
+  <a href="README.md"><strong>中文</strong></a> |
+  <a href="README_EN.md">English</a>
+</p>
+
+<p align="center">
   <a href="docs/README.md"><strong>📚 文档中心</strong></a> ·
   <a href="docs/getting-started.md">快速上手</a> ·
   <a href="docs/deployment.md">部署指南</a> ·
@@ -399,6 +404,47 @@ Metapi 对下游暴露标准 OpenAI / Claude 兼容接口：
 | **API Key**  | 你设置的 `PROXY_TOKEN` 值                                 |
 | **模型列表** | 自动从 `GET /v1/models` 获取                              |
 
+### CLI 快速配置（Claude Code / Codex）
+
+#### Claude Code（`~/.claude/settings.json`）
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://your-domain.com",
+    "ANTHROPIC_API_KEY": "your-proxy-sk-token",
+    "ANTHROPIC_AUTH_TOKEN": "your-proxy-sk-token",
+    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  }
+}
+```
+
+> 说明：不同版本客户端可能读取 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN`，建议同时设置。
+
+#### Codex（`~/.codex/config.toml` + `~/.codex/auth.json`）
+
+`~/.codex/config.toml`
+
+```toml
+model = "gpt-5"
+model_provider = "metapi"
+
+[model_providers.metapi]
+name = "metapi"
+base_url = "https://your-domain.com/v1"
+```
+
+`~/.codex/auth.json`
+
+```json
+{
+  "OPENAI_API_KEY": "your-proxy-sk-token"
+}
+```
+
+> 提示：`model` 需要是你在 Metapi `GET /v1/models` 可见的模型名。
+
 ### 已验证兼容的客户端
 
 - [ChatGPT-Next-Web](https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web)
@@ -406,6 +452,7 @@ Metapi 对下游暴露标准 OpenAI / Claude 兼容接口：
 - [Cherry Studio](https://github.com/kangfenmao/cherry-studio)
 - [Cursor](https://cursor.sh)
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- Codex CLI
 - [Roo Code](https://github.com/RooVetGit/Roo-Code)
 - [Kilo Code](https://github.com/kilocode/kilocode)
 - 以及所有支持 OpenAI API 格式的客户端
