@@ -183,7 +183,7 @@ Alert scenarios: low balance warning, site/account anomalies, check-in failures,
 ### Lightweight Deployment
 
 - **Single Docker container** with built-in SQLite — no external dependencies
-- Debian slim base image, balancing compatibility and image size
+- Alpine base image, minimal footprint
 - Full data import/export for worry-free migration
 
 ---
@@ -499,7 +499,7 @@ For detailed integration instructions: [docs/client-integration.md](docs/client-
 | **Database** | SQLite ([better-sqlite3](https://github.com/WiseLibs/better-sqlite3)) + [Drizzle ORM](https://orm.drizzle.team) |
 | **Charts** | [VChart](https://visactor.io/vchart) (@visactor/react-vchart) |
 | **Scheduling** | [node-cron](https://github.com/node-cron/node-cron) |
-| **Containerization** | Docker (Debian slim) + Docker Compose |
+| **Containerization** | Docker (Alpine) + Docker Compose |
 | **Testing** | [Vitest](https://vitest.dev) |
 
 ---

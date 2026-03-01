@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ COPY . .
 RUN npm run build
 RUN npm prune --omit=dev
 
-FROM node:20-bookworm-slim
+FROM node:20-alpine
 
 WORKDIR /app
 
