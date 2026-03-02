@@ -931,6 +931,90 @@ describe('chat proxy stream behavior', () => {
     expect(targetUrl).not.toContain('/v1/messages');
   });
 
+  it('preserves claude tool_use/tool_result when claude downstream is routed to openai chat endpoint', async () => {
+    selectChannelMock.mockReturnValue({
+      channel: { id: 11, routeId: 22 },
+      site: { name: 'openai-site', url: 'https://api.openai.com', platform: 'openai' },
+      account: { id: 33, username: 'demo-user' },
+      tokenName: 'default',
+      tokenValue: 'sk-openai',
+      actualModel: 'gpt-4o-mini',
+    });
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      id: 'chatcmpl-openai-tools',
+      object: 'chat.completion',
+      created: 1_706_000_006,
+      model: 'gpt-4o-mini',
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: 'tool payload received' },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        model: 'gpt-4o-mini',
+        max_tokens: 256,
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_abc',
+                name: 'Glob',
+                input: { pattern: 'README*' },
+              },
+            ],
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_abc',
+                content: [{ type: 'text', text: '{\"matches\":1}' }],
+              },
+              {
+                type: 'text',
+                text: 'continue',
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const [_targetUrl, options] = fetchMock.mock.calls[0] as [string, any];
+    const forwardedBody = JSON.parse(options.body);
+    const forwardedMessages = Array.isArray(forwardedBody.messages) ? forwardedBody.messages : [];
+
+    const assistantWithToolCalls = forwardedMessages.find((item: any) =>
+      item?.role === 'assistant'
+      && Array.isArray(item?.tool_calls)
+      && item.tool_calls.length > 0,
+    );
+    expect(assistantWithToolCalls).toBeTruthy();
+    expect(assistantWithToolCalls.tool_calls[0].id).toBe('toolu_abc');
+    expect(assistantWithToolCalls.tool_calls[0].function?.name).toBe('Glob');
+    expect(assistantWithToolCalls.tool_calls[0].function?.arguments).toContain('README*');
+
+    const toolMessage = forwardedMessages.find((item: any) => item?.role === 'tool');
+    expect(toolMessage).toBeTruthy();
+    expect(toolMessage.tool_call_id).toBe('toolu_abc');
+    expect(toolMessage.content).toContain('matches');
+  });
+
   it('forces claude platform to use /v1/messages with x-api-key auth for openai downstream requests', async () => {
     selectChannelMock.mockReturnValue({
       channel: { id: 11, routeId: 22 },
@@ -970,6 +1054,277 @@ describe('chat proxy stream behavior', () => {
     expect(options.headers['x-api-key']).toBe('sk-claude');
     expect(options.headers['anthropic-version']).toBeTruthy();
     expect(options.headers.Authorization).toBeUndefined();
+  });
+
+  it('preserves openai tool context when /v1/chat/completions is routed to /v1/messages upstream', async () => {
+    selectChannelMock.mockReturnValue({
+      channel: { id: 11, routeId: 22 },
+      site: { name: 'claude-site', url: 'https://api.anthropic.com', platform: 'claude' },
+      account: { id: 33, username: 'demo-user' },
+      tokenName: 'default',
+      tokenValue: 'sk-claude',
+      actualModel: 'claude-sonnet-4-5-20250929',
+    });
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      id: 'msg_claude_tool_context',
+      type: 'message',
+      model: 'claude-sonnet-4-5-20250929',
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'claude-sonnet-4-5-20250929',
+        stream: false,
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'Glob',
+            description: 'Search files',
+            parameters: {
+              type: 'object',
+              properties: {
+                pattern: { type: 'string' },
+              },
+              required: ['pattern'],
+            },
+          },
+        }],
+        tool_choice: {
+          type: 'function',
+          function: {
+            name: 'Glob',
+          },
+        },
+        messages: [
+          {
+            role: 'assistant',
+            tool_calls: [{
+              id: 'call_abc',
+              type: 'function',
+              function: {
+                name: 'Glob',
+                arguments: '{"pattern":"README*"}',
+              },
+            }],
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_abc',
+            content: '{"matches":1}',
+          },
+          {
+            role: 'user',
+            content: 'continue',
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const [_targetUrl, options] = fetchMock.mock.calls[0] as [string, any];
+    const forwardedBody = JSON.parse(options.body);
+    expect(Array.isArray(forwardedBody.messages)).toBe(true);
+
+    const assistantMessage = forwardedBody.messages.find((item: any) => item?.role === 'assistant');
+    expect(Array.isArray(assistantMessage?.content)).toBe(true);
+    expect(assistantMessage.content.some((part: any) => part?.type === 'tool_use')).toBe(true);
+
+    const userToolResultMessage = forwardedBody.messages.find((item: any) =>
+      item?.role === 'user'
+      && Array.isArray(item?.content)
+      && item.content.some((part: any) => part?.type === 'tool_result'),
+    );
+    expect(userToolResultMessage).toBeTruthy();
+    expect(userToolResultMessage.content[0].tool_use_id).toBe('call_abc');
+
+    expect(forwardedBody.tools?.[0]?.name).toBe('Glob');
+    expect(forwardedBody.tools?.[0]?.input_schema?.properties?.pattern?.type).toBe('string');
+    expect(forwardedBody.tool_choice).toEqual({ type: 'tool', name: 'Glob' });
+  });
+
+  it('converts /v1/responses function_call SSE to OpenAI tool_calls on /v1/chat/completions', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'upstream-gpt',
+          supportedEndpointTypes: ['/v1/responses'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    const encoder = new TextEncoder();
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: response.created\ndata: {"type":"response.created","response":{"id":"resp_123","model":"upstream-gpt","created_at":1706000000,"status":"in_progress","output":[]}}\n\n'));
+        controller.enqueue(encoder.encode('event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"Glob"}}\n\n'));
+        controller.enqueue(encoder.encode('event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","output_index":0,"call_id":"call_abc","delta":"{\\"pattern\\":\\"README*\\"}"}\n\n'));
+        controller.enqueue(encoder.encode('event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_123","model":"upstream-gpt","status":"completed","usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValue(new Response(upstreamBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'claude-haiku-4-5-20251001',
+        stream: true,
+        messages: [{ role: 'user', content: 'find readme' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('"tool_calls"');
+    expect(response.body).toContain('"id":"call_abc"');
+    expect(response.body).toContain('"name":"Glob"');
+    expect(response.body).toContain('\\"pattern\\":\\"README*\\"');
+  });
+
+  it('preserves non-stream function_call output when /v1/chat/completions falls back to /v1/responses', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'upstream-gpt',
+          supportedEndpointTypes: ['/v1/responses'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      id: 'resp_tool_nonstream',
+      object: 'response',
+      model: 'upstream-gpt',
+      status: 'completed',
+      output: [{
+        type: 'function_call',
+        id: 'fc_1',
+        call_id: 'call_abc',
+        name: 'Glob',
+        arguments: '{"pattern":"README*"}',
+      }],
+      output_text: '',
+      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'claude-haiku-4-5-20251001',
+        stream: false,
+        messages: [{ role: 'user', content: 'find readme' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body?.choices?.[0]?.message?.tool_calls?.[0]?.id).toBe('call_abc');
+    expect(body?.choices?.[0]?.message?.tool_calls?.[0]?.function?.name).toBe('Glob');
+    expect(body?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments).toContain('README*');
+    expect(body?.choices?.[0]?.finish_reason).toBe('tool_calls');
+  });
+
+  it('preserves openai tool context when /v1/chat/completions is routed to /v1/responses upstream', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'upstream-gpt',
+          supportedEndpointTypes: ['/v1/responses'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      id: 'resp_tool_forward',
+      object: 'response',
+      model: 'upstream-gpt',
+      status: 'completed',
+      output: [],
+      output_text: 'ok',
+      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'claude-haiku-4-5-20251001',
+        stream: false,
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'Glob',
+            parameters: {
+              type: 'object',
+              properties: { pattern: { type: 'string' } },
+              required: ['pattern'],
+            },
+          },
+        }],
+        tool_choice: {
+          type: 'function',
+          function: { name: 'Glob' },
+        },
+        messages: [
+          {
+            role: 'assistant',
+            tool_calls: [{
+              id: 'call_abc',
+              type: 'function',
+              function: {
+                name: 'Glob',
+                arguments: '{"pattern":"README*"}',
+              },
+            }],
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_abc',
+            content: '{"matches":1}',
+          },
+          {
+            role: 'user',
+            content: 'continue',
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const [targetUrl, options] = fetchMock.mock.calls[0] as [string, any];
+    expect(targetUrl).toContain('/v1/responses');
+
+    const forwardedBody = JSON.parse(options.body);
+    expect(Array.isArray(forwardedBody.input)).toBe(true);
+    expect(forwardedBody.input.some((item: any) => item?.type === 'function_call')).toBe(true);
+    expect(forwardedBody.input.some((item: any) => item?.type === 'function_call_output')).toBe(true);
+    expect(forwardedBody.tools?.[0]?.name).toBe('Glob');
+    expect(forwardedBody.tool_choice).toEqual({ type: 'function', name: 'Glob' });
   });
 
   it('routes gemini platform to OpenAI-compatible upstream endpoint path', async () => {

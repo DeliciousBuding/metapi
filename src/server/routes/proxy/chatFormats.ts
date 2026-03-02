@@ -49,6 +49,11 @@ export type NormalizedFinalResponse = {
   content: string;
   reasoningContent: string;
   finishReason: string;
+  toolCalls: Array<{
+    id: string;
+    name: string;
+    arguments: string;
+  }>;
 };
 
 export type ParsedDownstreamChatRequest = {
@@ -282,21 +287,154 @@ function parseResponsesOutputText(payload: Record<string, unknown>): string {
   return parts.join('\n\n');
 }
 
+function stringifyUnknownValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value) || isRecord(value)) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+function parseJsonLike(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed) return {};
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return { value };
+  }
+}
+
+function collectToolCallsFromOpenAiChoice(choice: any): Array<{ id: string; name: string; arguments: string }> {
+  const message = isRecord(choice?.message) ? choice.message : {};
+  const rawToolCalls = Array.isArray((message as any).tool_calls)
+    ? (message as any).tool_calls
+    : (Array.isArray(choice?.tool_calls) ? choice.tool_calls : []);
+
+  const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
+  for (let index = 0; index < rawToolCalls.length; index += 1) {
+    const rawToolCall = rawToolCalls[index];
+    if (!isRecord(rawToolCall)) continue;
+    const fn = isRecord(rawToolCall.function) ? rawToolCall.function : {};
+    const id = (
+      typeof rawToolCall.id === 'string' && rawToolCall.id.trim().length > 0
+        ? rawToolCall.id.trim()
+        : `call_${index}`
+    );
+    const name = (
+      typeof fn.name === 'string' && fn.name.trim().length > 0
+        ? fn.name.trim()
+        : (typeof rawToolCall.name === 'string' ? rawToolCall.name.trim() : '')
+    );
+    const argumentsText = (
+      typeof fn.arguments === 'string'
+        ? fn.arguments
+        : stringifyUnknownValue(fn.arguments ?? rawToolCall.arguments)
+    );
+    toolCalls.push({
+      id,
+      name,
+      arguments: argumentsText,
+    });
+  }
+
+  return toolCalls;
+}
+
+function collectToolCallsFromClaudeContent(content: unknown): Array<{ id: string; name: string; arguments: string }> {
+  const contentItems = Array.isArray(content) ? content : [];
+  const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
+
+  for (let index = 0; index < contentItems.length; index += 1) {
+    const block = contentItems[index];
+    if (!isRecord(block)) continue;
+    if (block.type !== 'tool_use') continue;
+
+    const id = (
+      typeof block.id === 'string' && block.id.trim().length > 0
+        ? block.id.trim()
+        : `toolu_${index}`
+    );
+    const name = typeof block.name === 'string' ? block.name.trim() : '';
+    const argumentsText = stringifyUnknownValue(block.input);
+    toolCalls.push({
+      id,
+      name,
+      arguments: argumentsText,
+    });
+  }
+
+  return toolCalls;
+}
+
+function collectToolCallsFromResponsesPayload(payload: Record<string, unknown>): Array<{ id: string; name: string; arguments: string }> {
+  const output = Array.isArray(payload.output) ? payload.output : [];
+  const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
+
+  for (let index = 0; index < output.length; index += 1) {
+    const item = output[index];
+    if (!isRecord(item)) continue;
+    if (item.type !== 'function_call') continue;
+
+    const id = (
+      typeof item.call_id === 'string' && item.call_id.trim().length > 0
+        ? item.call_id.trim()
+        : (typeof item.id === 'string' && item.id.trim().length > 0 ? item.id.trim() : `call_${index}`)
+    );
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    const argumentsText = (
+      typeof item.arguments === 'string'
+        ? item.arguments
+        : stringifyUnknownValue(item.arguments)
+    );
+    toolCalls.push({
+      id,
+      name,
+      arguments: argumentsText,
+    });
+  }
+
+  return toolCalls;
+}
+
 function convertClaudeRequestToOpenAiBody(body: Record<string, unknown>): {
   model: string;
   stream: boolean;
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<Record<string, unknown>>;
   payload: Record<string, unknown>;
 } {
   const model = typeof body.model === 'string' ? body.model.trim() : '';
   const stream = body.stream === true;
 
-  const messages: Array<{ role: string; content: string }> = [];
+  const messages: Array<Record<string, unknown>> = [];
 
   const appendMessage = (role: string, content: unknown) => {
     const text = parseClaudeMessageContent(content);
     if (!text) return;
     messages.push({ role, content: text });
+  };
+
+  const appendToolResultMessage = (toolUseId: unknown, content: unknown) => {
+    const toolCallId = typeof toolUseId === 'string' ? toolUseId.trim() : '';
+    if (!toolCallId) return;
+
+    const text = (
+      parseClaudeMessageContent(content)
+      || stringifyUnknownValue(content)
+    ).trim();
+    if (!text) return;
+
+    messages.push({
+      role: 'tool',
+      tool_call_id: toolCallId,
+      content: text,
+    });
   };
 
   const system = body.system;
@@ -312,7 +450,78 @@ function convertClaudeRequestToOpenAiBody(body: Record<string, unknown>): {
     if (!isRecord(message)) continue;
     const role = typeof message.role === 'string' ? message.role : 'user';
     const mappedRole = role === 'assistant' || role === 'system' ? role : 'user';
-    appendMessage(mappedRole, message.content);
+    const content = message.content;
+
+    if (!Array.isArray(content)) {
+      appendMessage(mappedRole, content);
+      continue;
+    }
+
+    // Claude tool blocks need explicit OpenAI mapping:
+    // - assistant.tool_use  -> assistant.tool_calls
+    // - user.tool_result    -> tool messages with tool_call_id
+    const textParts: string[] = [];
+    const toolCalls: Array<Record<string, unknown>> = [];
+
+    const flushTextAsMessage = () => {
+      const merged = textParts.map((item) => item.trim()).filter(Boolean).join('\n\n');
+      textParts.length = 0;
+      if (!merged) return;
+      messages.push({ role: mappedRole, content: merged });
+    };
+
+    for (const block of content) {
+      if (!isRecord(block)) continue;
+      const blockType = typeof block.type === 'string' ? block.type : '';
+
+      if (blockType === 'tool_result') {
+        flushTextAsMessage();
+        appendToolResultMessage(block.tool_use_id, block.content);
+        continue;
+      }
+
+      if (mappedRole === 'assistant' && blockType === 'tool_use') {
+        const id = typeof block.id === 'string' && block.id.trim().length > 0
+          ? block.id.trim()
+          : `call_${toolCalls.length}`;
+        const name = typeof block.name === 'string' ? block.name.trim() : '';
+        const rawInput = block.input;
+        const args = (
+          typeof rawInput === 'string'
+            ? rawInput
+            : stringifyUnknownValue(rawInput) || '{}'
+        );
+
+        const fn: Record<string, unknown> = { arguments: args };
+        if (name) fn.name = name;
+
+        toolCalls.push({
+          id,
+          type: 'function',
+          function: fn,
+        });
+        continue;
+      }
+
+      const text = parseClaudeMessageContent(block);
+      if (text) textParts.push(text);
+    }
+
+    const merged = textParts.map((item) => item.trim()).filter(Boolean).join('\n\n');
+    if (toolCalls.length > 0) {
+      const assistantMessage: Record<string, unknown> = {
+        role: 'assistant',
+        tool_calls: toolCalls,
+      };
+      // Keep textual assistant preface when present.
+      assistantMessage.content = merged || '';
+      messages.push(assistantMessage);
+    } else if (merged) {
+      messages.push({
+        role: mappedRole,
+        content: merged,
+      });
+    }
   }
 
   const payload: Record<string, unknown> = {
@@ -424,35 +633,45 @@ export function normalizeUpstreamFinalResponse(
     const choice = payload.choices[0] ?? {};
     const content = extractAssistantContent(choice) || extractAssistantContent(payload);
     const reasoning = extractAssistantReasoning(choice) || extractAssistantReasoning(payload);
+    const toolCalls = collectToolCallsFromOpenAiChoice(choice);
     return {
       id: isNonEmptyString(payload.id) ? payload.id : fallbackId,
       model: isNonEmptyString(payload.model) ? payload.model : fallbackModel,
       created: ensureIntegerTimestamp(payload.created, now),
-      content: content || fallbackText,
+      content: content || (toolCalls.length > 0 ? '' : fallbackText),
       reasoningContent: reasoning,
-      finishReason: normalizeStopReason(choice?.finish_reason ?? payload.stop_reason) || 'stop',
+      finishReason: toolCalls.length > 0
+        ? 'tool_calls'
+        : (normalizeStopReason(choice?.finish_reason ?? payload.stop_reason) || 'stop'),
+      toolCalls,
     };
   }
 
   if (isRecord(payload) && typeof payload.type === 'string' && payload.type === 'message') {
+    const toolCalls = collectToolCallsFromClaudeContent(payload.content);
     return {
       id: isNonEmptyString(payload.id) ? payload.id : fallbackId,
       model: isNonEmptyString(payload.model) ? payload.model : fallbackModel,
       created: now,
-      content: parseClaudeMessageContent(payload.content) || fallbackText,
+      content: parseClaudeMessageContent(payload.content) || (toolCalls.length > 0 ? '' : fallbackText),
       reasoningContent: extractTextAndReasoning(payload.content).reasoning,
-      finishReason: normalizeStopReason(payload.stop_reason) || 'stop',
+      finishReason: toolCalls.length > 0 ? 'tool_calls' : (normalizeStopReason(payload.stop_reason) || 'stop'),
+      toolCalls,
     };
   }
 
   if (isRecord(payload) && ((payload as any).object === 'response' || Array.isArray((payload as any).output))) {
+    const toolCalls = collectToolCallsFromResponsesPayload(payload);
     return {
       id: isNonEmptyString(payload.id) ? payload.id : fallbackId,
       model: isNonEmptyString(payload.model) ? payload.model : fallbackModel,
       created: ensureIntegerTimestamp(payload.created, now),
-      content: parseResponsesOutputText(payload) || fallbackText,
+      content: parseResponsesOutputText(payload) || (toolCalls.length > 0 ? '' : fallbackText),
       reasoningContent: '',
-      finishReason: normalizeStopReason(payload.finish_reason ?? payload.status) || 'stop',
+      finishReason: toolCalls.length > 0
+        ? 'tool_calls'
+        : (normalizeStopReason(payload.finish_reason ?? payload.status) || 'stop'),
+      toolCalls,
     };
   }
 
@@ -468,6 +687,7 @@ export function normalizeUpstreamFinalResponse(
       content: parsedCandidate.content || fallbackText,
       reasoningContent: parsedCandidate.reasoning,
       finishReason: normalizeStopReason(candidate?.finishReason || (payload as any).finishReason) || 'stop',
+      toolCalls: [],
     };
   }
 
@@ -479,6 +699,7 @@ export function normalizeUpstreamFinalResponse(
       content: payload,
       reasoningContent: '',
       finishReason: 'stop',
+      toolCalls: [],
     };
   }
 
@@ -489,6 +710,7 @@ export function normalizeUpstreamFinalResponse(
     content: fallbackText,
     reasoningContent: '',
     finishReason: 'stop',
+    toolCalls: [],
   };
 }
 
@@ -567,6 +789,64 @@ export function normalizeUpstreamStreamEvent(
       : extractTextAndReasoning(payload.delta).content;
     return {
       contentDelta: deltaText || undefined,
+    };
+  }
+
+  if (type === 'response.reasoning_summary_text.delta') {
+    const deltaText = typeof payload.delta === 'string'
+      ? payload.delta
+      : extractTextAndReasoning(payload.delta).content;
+    return {
+      reasoningDelta: deltaText || undefined,
+    };
+  }
+
+  if (type === 'response.output_item.added' && isRecord((payload as any).item)) {
+    const item = (payload as any).item as Record<string, unknown>;
+    if (item.type === 'function_call') {
+      const outputIndex = (
+        typeof (payload as any).output_index === 'number' && Number.isFinite((payload as any).output_index)
+          ? Math.max(0, Math.trunc((payload as any).output_index))
+          : 0
+      );
+      const toolCallId = (
+        isNonEmptyString(item.call_id) ? item.call_id
+          : (isNonEmptyString(item.id) ? item.id : undefined)
+      );
+      const toolName = isNonEmptyString(item.name) ? item.name : undefined;
+      return {
+        toolCallDeltas: [{
+          index: outputIndex,
+          id: toolCallId,
+          name: toolName,
+        }],
+      };
+    }
+  }
+
+  if (type === 'response.function_call_arguments.delta' || type === 'response.function_call_arguments.done') {
+    const outputIndex = (
+      typeof (payload as any).output_index === 'number' && Number.isFinite((payload as any).output_index)
+        ? Math.max(0, Math.trunc((payload as any).output_index))
+        : 0
+    );
+    const toolCallId = (
+      isNonEmptyString((payload as any).call_id) ? (payload as any).call_id
+        : (isNonEmptyString((payload as any).item_id) ? (payload as any).item_id : undefined)
+    );
+    const toolName = isNonEmptyString((payload as any).name) ? (payload as any).name : undefined;
+    const argumentsDelta = (
+      typeof payload.delta === 'string'
+        ? payload.delta
+        : (typeof (payload as any).arguments === 'string' ? (payload as any).arguments : undefined)
+    );
+    return {
+      toolCallDeltas: [{
+        index: outputIndex,
+        id: toolCallId,
+        name: toolName,
+        argumentsDelta,
+      }],
     };
   }
 
@@ -1020,21 +1300,61 @@ export function serializeStreamDone(
   return buildClaudeDoneEvents(context, claudeContext, 'stop');
 }
 
+function toOpenAiToolCalls(
+  toolCalls: Array<{ id: string; name: string; arguments: string }>,
+): Array<Record<string, unknown>> {
+  return toolCalls.map((toolCall, index) => ({
+    index,
+    id: toolCall.id || `call_${index}`,
+    type: 'function',
+    function: {
+      name: toolCall.name || '',
+      arguments: toolCall.arguments || '',
+    },
+  }));
+}
+
 export function serializeFinalResponse(
   downstreamFormat: DownstreamFormat,
   normalized: NormalizedFinalResponse,
   usage: { promptTokens: number; completionTokens: number; totalTokens: number },
 ): Record<string, unknown> {
+  const toolCalls = Array.isArray(normalized.toolCalls) ? normalized.toolCalls : [];
+
   if (downstreamFormat === 'claude') {
+    const contentBlocks: Array<Record<string, unknown>> = [];
+    if (normalized.reasoningContent) {
+      contentBlocks.push({
+        type: 'thinking',
+        thinking: normalized.reasoningContent,
+      });
+    }
+    if (normalized.content) {
+      contentBlocks.push({
+        type: 'text',
+        text: normalized.content,
+      });
+    }
+    for (let index = 0; index < toolCalls.length; index += 1) {
+      const toolCall = toolCalls[index];
+      contentBlocks.push({
+        type: 'tool_use',
+        id: toolCall.id || `toolu_${index}`,
+        name: toolCall.name || `tool_${index}`,
+        input: parseJsonLike(toolCall.arguments || ''),
+      });
+    }
+
+    const content = contentBlocks.length > 0
+      ? contentBlocks
+      : [{ type: 'text', text: '' }];
+
     return {
       id: buildClaudeMessageId(normalized.id),
       type: 'message',
       role: 'assistant',
       model: normalized.model,
-      content: [{
-        type: 'text',
-        text: normalized.content,
-      }],
+      content,
       stop_reason: toClaudeStopReason(normalized.finishReason),
       stop_sequence: null,
       usage: {
@@ -1051,6 +1371,16 @@ export function serializeFinalResponse(
   if (normalized.reasoningContent) {
     message.reasoning_content = normalized.reasoningContent;
   }
+  if (toolCalls.length > 0) {
+    message.tool_calls = toOpenAiToolCalls(toolCalls);
+    if (!normalized.content) message.content = '';
+  }
+
+  const finishReason = (
+    toolCalls.length > 0
+      ? 'tool_calls'
+      : (normalizeStopReason(normalized.finishReason) || 'stop')
+  );
 
   return {
     id: normalized.id,
@@ -1060,7 +1390,7 @@ export function serializeFinalResponse(
     choices: [{
       index: 0,
       message,
-      finish_reason: normalizeStopReason(normalized.finishReason) || 'stop',
+      finish_reason: finishReason,
     }],
     usage: {
       prompt_tokens: usage.promptTokens,
@@ -1071,6 +1401,28 @@ export function serializeFinalResponse(
 }
 
 export function buildSyntheticOpenAiChunks(normalized: NormalizedFinalResponse): Array<Record<string, unknown>> {
+  const toolCalls = Array.isArray(normalized.toolCalls) ? normalized.toolCalls : [];
+  const finishReason = (
+    toolCalls.length > 0
+      ? 'tool_calls'
+      : (normalizeStopReason(normalized.finishReason) || 'stop')
+  );
+
+  const startDelta: Record<string, unknown> = {
+    role: 'assistant',
+  };
+  if (normalized.content) {
+    startDelta.content = normalized.content;
+  } else {
+    startDelta.content = '';
+  }
+  if (normalized.reasoningContent) {
+    startDelta.reasoning_content = normalized.reasoningContent;
+  }
+  if (toolCalls.length > 0) {
+    startDelta.tool_calls = toOpenAiToolCalls(toolCalls);
+  }
+
   const startChunk: Record<string, unknown> = {
     id: normalized.id,
     object: 'chat.completion.chunk',
@@ -1078,16 +1430,10 @@ export function buildSyntheticOpenAiChunks(normalized: NormalizedFinalResponse):
     model: normalized.model,
     choices: [{
       index: 0,
-      delta: normalized.content
-        ? { role: 'assistant', content: normalized.content }
-        : { role: 'assistant' },
+      delta: startDelta,
       finish_reason: null,
     }],
   };
-
-  if (normalized.reasoningContent) {
-    (startChunk.choices as any[])[0].delta.reasoning_content = normalized.reasoningContent;
-  }
 
   const endChunk = {
     id: normalized.id,
@@ -1097,7 +1443,7 @@ export function buildSyntheticOpenAiChunks(normalized: NormalizedFinalResponse):
     choices: [{
       index: 0,
       delta: {},
-      finish_reason: normalizeStopReason(normalized.finishReason) || 'stop',
+      finish_reason: finishReason,
     }],
   };
 

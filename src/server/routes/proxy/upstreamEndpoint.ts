@@ -216,6 +216,166 @@ function normalizeContentText(content: unknown): string {
   return '';
 }
 
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+}
+
+function parseJsonString(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return { value: raw };
+  }
+}
+
+function normalizeOpenAiToolArguments(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (raw === undefined || raw === null) return '';
+  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
+  if (Array.isArray(raw) || isRecord(raw)) {
+    return safeJsonStringify(raw);
+  }
+  return '';
+}
+
+function normalizeAnthropicToolInput(raw: unknown): unknown {
+  if (raw === undefined || raw === null) return {};
+  if (isRecord(raw) || Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') return parseJsonString(raw);
+  if (typeof raw === 'number' || typeof raw === 'boolean') return raw;
+  return {};
+}
+
+function normalizeToolMessageContent(raw: unknown): string {
+  const contentText = normalizeContentText(raw).trim();
+  if (contentText) return contentText;
+
+  if (raw === undefined || raw === null) return '';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
+  if (Array.isArray(raw) || isRecord(raw)) return safeJsonStringify(raw);
+  return '';
+}
+
+function convertOpenAiToolsToAnthropic(rawTools: unknown): unknown {
+  if (!Array.isArray(rawTools)) return rawTools;
+
+  const converted = rawTools
+    .map((item) => {
+      if (!isRecord(item)) return null;
+
+      const type = asTrimmedString(item.type).toLowerCase();
+      if (type === 'function' && isRecord(item.function)) {
+        const fn = item.function;
+        const name = asTrimmedString(fn.name);
+        if (!name) return null;
+
+        const mapped: Record<string, unknown> = { name };
+        const description = asTrimmedString(fn.description);
+        if (description) mapped.description = description;
+        if (fn.parameters !== undefined) mapped.input_schema = fn.parameters;
+        if (item.cache_control !== undefined) mapped.cache_control = item.cache_control;
+        return mapped;
+      }
+
+      if (asTrimmedString(item.name) && item.input_schema !== undefined) {
+        return item;
+      }
+
+      return null;
+    })
+    .filter((item): item is Record<string, unknown> => !!item);
+
+  return converted.length > 0 ? converted : rawTools;
+}
+
+function convertOpenAiToolChoiceToAnthropic(rawToolChoice: unknown): unknown {
+  if (rawToolChoice === undefined) return undefined;
+
+  if (typeof rawToolChoice === 'string') {
+    const normalized = rawToolChoice.trim().toLowerCase();
+    if (normalized === 'required') return { type: 'any' };
+    if (normalized === 'none') return { type: 'none' };
+    if (normalized === 'auto') return { type: 'auto' };
+    if (normalized === 'any') return { type: 'any' };
+    return rawToolChoice;
+  }
+
+  if (!isRecord(rawToolChoice)) return rawToolChoice;
+
+  const type = asTrimmedString(rawToolChoice.type).toLowerCase();
+  if (type === 'function' && isRecord(rawToolChoice.function)) {
+    const name = asTrimmedString(rawToolChoice.function.name);
+    return name ? { type: 'tool', name } : { type: 'any' };
+  }
+
+  if (type === 'tool' || type === 'auto' || type === 'any' || type === 'none') {
+    return rawToolChoice;
+  }
+
+  return rawToolChoice;
+}
+
+function convertOpenAiToolsToResponses(rawTools: unknown): unknown {
+  if (!Array.isArray(rawTools)) return rawTools;
+
+  const converted = rawTools
+    .map((item) => {
+      if (!isRecord(item)) return null;
+
+      const type = asTrimmedString(item.type).toLowerCase();
+      if (type === 'function' && isRecord(item.function)) {
+        const fn = item.function;
+        const name = asTrimmedString(fn.name);
+        if (!name) return null;
+
+        const mapped: Record<string, unknown> = {
+          type: 'function',
+          name,
+        };
+        const description = asTrimmedString(fn.description);
+        if (description) mapped.description = description;
+        if (fn.parameters !== undefined) mapped.parameters = fn.parameters;
+        if (fn.strict !== undefined) mapped.strict = fn.strict;
+        return mapped;
+      }
+
+      if (type === 'function' && asTrimmedString(item.name)) {
+        return item;
+      }
+
+      if (type === 'image_generation') {
+        return item;
+      }
+
+      return null;
+    })
+    .filter((item): item is Record<string, unknown> => !!item);
+
+  return converted.length > 0 ? converted : rawTools;
+}
+
+function convertOpenAiToolChoiceToResponses(rawToolChoice: unknown): unknown {
+  if (rawToolChoice === undefined) return undefined;
+  if (typeof rawToolChoice === 'string') return rawToolChoice;
+  if (!isRecord(rawToolChoice)) return rawToolChoice;
+
+  const type = asTrimmedString(rawToolChoice.type).toLowerCase();
+  if (type === 'function' && isRecord(rawToolChoice.function)) {
+    const name = asTrimmedString(rawToolChoice.function.name);
+    if (!name) return 'required';
+    return { type: 'function', name };
+  }
+
+  return rawToolChoice;
+}
+
 function convertOpenAiBodyToMessagesBody(
   openaiBody: Record<string, unknown>,
   modelName: string,
@@ -223,21 +383,98 @@ function convertOpenAiBodyToMessagesBody(
 ): Record<string, unknown> {
   const rawMessages = Array.isArray(openaiBody.messages) ? openaiBody.messages : [];
   const systemContents: string[] = [];
-  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  const messages: Array<{
+    role: 'user' | 'assistant';
+    content: string | Array<Record<string, unknown>>;
+  }> = [];
 
   for (const item of rawMessages) {
     if (!isRecord(item)) continue;
-    const role = asTrimmedString(item.role) || 'user';
-    const content = normalizeContentText(item.content);
-    if (!content) continue;
+    const role = asTrimmedString(item.role).toLowerCase() || 'user';
 
-    if (role === 'system') {
+    if (role === 'system' || role === 'developer') {
+      const content = normalizeContentText(item.content);
+      if (!content) continue;
       systemContents.push(content);
       continue;
     }
 
+    if (role === 'tool') {
+      const toolUseId = asTrimmedString(item.tool_call_id) || asTrimmedString(item.id);
+      if (!toolUseId) continue;
+
+      const toolResultContent = normalizeToolMessageContent(item.content).trim();
+      if (!toolResultContent) continue;
+
+      messages.push({
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: toolUseId,
+          content: toolResultContent,
+        }],
+      });
+      continue;
+    }
+
+    if (role === 'assistant') {
+      const contentBlocks: Array<Record<string, unknown>> = [];
+
+      const textContent = normalizeContentText(item.content).trim();
+      if (textContent) {
+        contentBlocks.push({
+          type: 'text',
+          text: textContent,
+        });
+      }
+
+      const rawToolCalls = Array.isArray(item.tool_calls) ? item.tool_calls : [];
+      for (let index = 0; index < rawToolCalls.length; index += 1) {
+        const toolCall = rawToolCalls[index];
+        if (!isRecord(toolCall)) continue;
+        const functionPart = isRecord(toolCall.function) ? toolCall.function : {};
+
+        const id = asTrimmedString(toolCall.id) || `toolu_${Date.now()}_${index}`;
+        const name = (
+          asTrimmedString(functionPart.name)
+          || asTrimmedString(toolCall.name)
+          || `tool_${index}`
+        );
+        const input = normalizeAnthropicToolInput(functionPart.arguments ?? toolCall.arguments);
+
+        contentBlocks.push({
+          type: 'tool_use',
+          id,
+          name,
+          input,
+        });
+      }
+
+      if (contentBlocks.length <= 0) continue;
+
+      if (contentBlocks.length === 1 && contentBlocks[0].type === 'text') {
+        const singleText = asTrimmedString(contentBlocks[0].text);
+        if (singleText) {
+          messages.push({
+            role: 'assistant',
+            content: singleText,
+          });
+        }
+        continue;
+      }
+
+      messages.push({
+        role: 'assistant',
+        content: contentBlocks,
+      });
+      continue;
+    }
+
+    const content = normalizeContentText(item.content).trim();
+    if (!content) continue;
+
     messages.push({
-      role: role === 'assistant' ? 'assistant' : 'user',
+      role: 'user',
       content,
     });
   }
@@ -263,8 +500,11 @@ function convertOpenAiBodyToMessagesBody(
     body.stop_sequences = openaiBody.stop;
   }
 
-  if (openaiBody.tools !== undefined) body.tools = openaiBody.tools;
-  if (openaiBody.tool_choice !== undefined) body.tool_choice = openaiBody.tool_choice;
+  if (openaiBody.tools !== undefined) body.tools = convertOpenAiToolsToAnthropic(openaiBody.tools);
+
+  const anthropicToolChoice = convertOpenAiToolChoiceToAnthropic(openaiBody.tool_choice);
+  if (anthropicToolChoice !== undefined) body.tool_choice = anthropicToolChoice;
+
   return body;
 }
 
@@ -275,38 +515,107 @@ function convertOpenAiBodyToResponsesBody(
 ): Record<string, unknown> {
   const rawMessages = Array.isArray(openaiBody.messages) ? openaiBody.messages : [];
   const systemContents: string[] = [];
-  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  const inputItems: Array<Record<string, unknown>> = [];
 
   for (const item of rawMessages) {
     if (!isRecord(item)) continue;
-    const role = asTrimmedString(item.role) || 'user';
-    const content = normalizeContentText(item.content);
-    if (!content) continue;
+    const role = asTrimmedString(item.role).toLowerCase() || 'user';
 
-    if (role === 'system') {
+    if (role === 'system' || role === 'developer') {
+      const content = normalizeContentText(item.content).trim();
+      if (!content) continue;
       systemContents.push(content);
       continue;
     }
 
-    messages.push({
-      role: role === 'assistant' ? 'assistant' : 'user',
-      content,
+    if (role === 'assistant') {
+      const textContent = normalizeContentText(item.content).trim();
+      if (textContent) {
+        inputItems.push({
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: textContent }],
+        });
+      }
+
+      const rawToolCalls = Array.isArray(item.tool_calls) ? item.tool_calls : [];
+      for (let index = 0; index < rawToolCalls.length; index += 1) {
+        const toolCall = rawToolCalls[index];
+        if (!isRecord(toolCall)) continue;
+        const functionPart = isRecord(toolCall.function) ? toolCall.function : {};
+        const callId = asTrimmedString(toolCall.id) || `call_${Date.now()}_${index}`;
+        const name = (
+          asTrimmedString(functionPart.name)
+          || asTrimmedString(toolCall.name)
+          || `tool_${index}`
+        );
+        const argumentsValue = normalizeOpenAiToolArguments(
+          functionPart.arguments ?? toolCall.arguments,
+        );
+
+        inputItems.push({
+          type: 'function_call',
+          call_id: callId,
+          name,
+          arguments: argumentsValue,
+        });
+      }
+      continue;
+    }
+
+    if (role === 'tool') {
+      const callId = asTrimmedString(item.tool_call_id) || asTrimmedString(item.id);
+      if (!callId) continue;
+
+      inputItems.push({
+        type: 'function_call_output',
+        call_id: callId,
+        output: normalizeToolMessageContent(item.content),
+      });
+      continue;
+    }
+
+    const content = normalizeContentText(item.content).trim();
+    if (!content) continue;
+    inputItems.push({
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text: content }],
     });
   }
+
+  let input: unknown = inputItems;
+  if (systemContents.length === 0 && inputItems.length === 1) {
+    const first = inputItems[0];
+    const firstRole = asTrimmedString(first.role).toLowerCase();
+    const firstContent = Array.isArray(first.content) ? first.content : [];
+    if (
+      firstRole === 'user'
+      && firstContent.length === 1
+      && isRecord(firstContent[0])
+      && asTrimmedString(firstContent[0].type).toLowerCase() === 'input_text'
+      && asTrimmedString(firstContent[0].text)
+    ) {
+      input = asTrimmedString(firstContent[0].text);
+    }
+  }
+
+  const maxOutputTokens = (
+    toFiniteNumber(openaiBody.max_output_tokens)
+    ?? toFiniteNumber(openaiBody.max_completion_tokens)
+    ?? toFiniteNumber(openaiBody.max_tokens)
+    ?? 4096
+  );
 
   const body: Record<string, unknown> = {
     model: modelName,
     stream,
-    max_output_tokens: toFiniteNumber(openaiBody.max_tokens) ?? 4096,
+    max_output_tokens: maxOutputTokens,
+    input,
   };
 
-  if (messages.length === 1 && messages[0].role === 'user' && systemContents.length === 0) {
-    body.input = messages[0].content;
-  } else {
-    body.input = messages;
-    if (systemContents.length > 0) {
-      body.instructions = systemContents.join('\n\n');
-    }
+  if (systemContents.length > 0) {
+    body.instructions = systemContents.join('\n\n');
   }
 
   const temperature = toFiniteNumber(openaiBody.temperature);
@@ -315,8 +624,15 @@ function convertOpenAiBodyToResponsesBody(
   const topP = toFiniteNumber(openaiBody.top_p);
   if (topP !== null) body.top_p = topP;
 
-  if (openaiBody.tools !== undefined) body.tools = openaiBody.tools;
-  if (openaiBody.tool_choice !== undefined) body.tool_choice = openaiBody.tool_choice;
+  if (openaiBody.metadata !== undefined) body.metadata = openaiBody.metadata;
+  if (openaiBody.reasoning !== undefined) body.reasoning = openaiBody.reasoning;
+  if (openaiBody.parallel_tool_calls !== undefined) body.parallel_tool_calls = openaiBody.parallel_tool_calls;
+
+  if (openaiBody.tools !== undefined) body.tools = convertOpenAiToolsToResponses(openaiBody.tools);
+
+  const responsesToolChoice = convertOpenAiToolChoiceToResponses(openaiBody.tool_choice);
+  if (responsesToolChoice !== undefined) body.tool_choice = responsesToolChoice;
+
   return body;
 }
 
