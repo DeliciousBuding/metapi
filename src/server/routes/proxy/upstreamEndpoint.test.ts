@@ -6,7 +6,7 @@ vi.mock('../../services/modelPricingService.js', () => ({
   fetchModelPricingCatalog: (arg: unknown) => fetchModelPricingCatalogMock(arg),
 }));
 
-import { resolveUpstreamEndpointCandidates } from './upstreamEndpoint.js';
+import { isEndpointDowngradeError, resolveUpstreamEndpointCandidates } from './upstreamEndpoint.js';
 
 const baseContext = {
   site: {
@@ -104,7 +104,7 @@ describe('resolveUpstreamEndpointCandidates', () => {
       'gpt-5.3',
       'openai',
     );
-    expect(openaiOrder).toEqual(['chat', 'responses']);
+    expect(openaiOrder).toEqual(['chat', 'responses', 'messages']);
 
     const openaiResponsesOrder = await resolveUpstreamEndpointCandidates(
       {
@@ -114,7 +114,17 @@ describe('resolveUpstreamEndpointCandidates', () => {
       'gpt-5.3',
       'responses',
     );
-    expect(openaiResponsesOrder).toEqual(['responses', 'chat']);
+    expect(openaiResponsesOrder).toEqual(['responses', 'chat', 'messages']);
+
+    const openaiClaudeOrder = await resolveUpstreamEndpointCandidates(
+      {
+        ...baseContext,
+        site: { ...baseContext.site, platform: 'openai' },
+      },
+      'claude-opus-4-6',
+      'openai',
+    );
+    expect(openaiClaudeOrder).toEqual(['messages', 'chat', 'responses']);
 
     const claudeOrder = await resolveUpstreamEndpointCandidates(
       {
@@ -125,6 +135,29 @@ describe('resolveUpstreamEndpointCandidates', () => {
       'claude',
     );
     expect(claudeOrder).toEqual(['messages']);
+  });
+
+  it('keeps claude models messages-first even when openai platform catalog prefers chat', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'claude-opus-4-6',
+          supportedEndpointTypes: ['/v1/chat/completions', 'openai'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    const order = await resolveUpstreamEndpointCandidates(
+      {
+        ...baseContext,
+        site: { ...baseContext.site, platform: 'openai' },
+      },
+      'claude-opus-4-6',
+      'openai',
+    );
+
+    expect(order).toEqual(['messages', 'chat', 'responses']);
   });
 
   it('keeps anyrouter messages-first special case', async () => {
@@ -147,5 +180,11 @@ describe('resolveUpstreamEndpointCandidates', () => {
       'responses',
     );
     expect(responsesOrder).toEqual(['responses', 'messages', 'chat']);
+  });
+
+  it('treats endpoint-not-found responses as downgrade candidates', () => {
+    expect(isEndpointDowngradeError(404, '{"error":{"message":"Not Found","type":"not_found_error"}}')).toBe(true);
+    expect(isEndpointDowngradeError(405, '{"error":{"message":"Method Not Allowed"}}')).toBe(true);
+    expect(isEndpointDowngradeError(400, '{"error":{"message":"unsupported endpoint","type":"invalid_request_error"}}')).toBe(true);
   });
 });

@@ -1096,6 +1096,105 @@ describe('chat proxy stream behavior', () => {
     expect(targetUrl).toContain('/v1/messages');
   });
 
+  it('prefers /v1/messages on openai platform for claude-family models on /v1/chat/completions', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'claude-opus-4-6',
+          supportedEndpointTypes: ['/v1/chat/completions', 'openai'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    selectChannelMock.mockReturnValue({
+      channel: { id: 11, routeId: 22 },
+      site: { name: 'openai-site', url: 'https://api.openai.com', platform: 'openai' },
+      account: { id: 33, username: 'demo-user' },
+      tokenName: 'default',
+      tokenValue: 'sk-openai',
+      actualModel: 'claude-opus-4-6',
+    });
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      id: 'msg_openai_platform_claude',
+      type: 'message',
+      model: 'claude-opus-4-6',
+      content: [{ type: 'text', text: 'messages endpoint selected' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 6, output_tokens: 2, total_tokens: 8 },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'claude-opus-4-6',
+        stream: false,
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [targetUrl] = fetchMock.mock.calls[0] as [string, any];
+    expect(targetUrl).toContain('/v1/messages');
+  });
+
+  it('falls back from /v1/messages to /v1/chat/completions on openai platform when messages endpoint is unavailable', async () => {
+    selectChannelMock.mockReturnValue({
+      channel: { id: 11, routeId: 22 },
+      site: { name: 'openai-site', url: 'https://api.openai.com', platform: 'openai' },
+      account: { id: 33, username: 'demo-user' },
+      tokenName: 'default',
+      tokenValue: 'sk-openai',
+      actualModel: 'claude-opus-4-6',
+    });
+
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { message: 'Not Found', type: 'not_found_error' },
+      }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'chatcmpl_openai_fallback_chat',
+        object: 'chat.completion',
+        created: 1_706_000_777,
+        model: 'claude-opus-4-6',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'fallback to chat completed' },
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'claude-opus-4-6',
+        stream: false,
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [firstUrl] = fetchMock.mock.calls[0] as [string, any];
+    const [secondUrl] = fetchMock.mock.calls[1] as [string, any];
+    expect(firstUrl).toContain('/v1/messages');
+    expect(secondUrl).toContain('/v1/chat/completions');
+  });
+
   it('forces openai platform to use /v1/chat/completions for claude downstream requests', async () => {
     selectChannelMock.mockReturnValue({
       channel: { id: 11, routeId: 22 },
@@ -1359,6 +1458,71 @@ describe('chat proxy stream behavior', () => {
     expect(forwardedBody.tool_choice).toEqual({ type: 'tool', name: 'Glob' });
   });
 
+  it('groups consecutive tool messages into one anthropic user turn when routing /v1/chat/completions to /v1/messages', async () => {
+    selectChannelMock.mockReturnValue({
+      channel: { id: 11, routeId: 22 },
+      site: { name: 'claude-site', url: 'https://api.anthropic.com', platform: 'claude' },
+      account: { id: 33, username: 'demo-user' },
+      tokenName: 'default',
+      tokenValue: 'sk-claude',
+      actualModel: 'claude-sonnet-4-5-20250929',
+    });
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      id: 'msg_claude_grouped_tool_results',
+      type: 'message',
+      model: 'claude-sonnet-4-5-20250929',
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'claude-sonnet-4-5-20250929',
+        stream: false,
+        messages: [
+          {
+            role: 'assistant',
+            tool_calls: [
+              {
+                id: 'call_one',
+                type: 'function',
+                function: { name: 'Glob', arguments: '{"pattern":"README*"}' },
+              },
+              {
+                id: 'call_two',
+                type: 'function',
+                function: { name: 'Read', arguments: '{"file":"README.md"}' },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_one', content: '{"matches":["README.md"]}' },
+          { role: 'tool', tool_call_id: 'call_two', content: '{"content":"hello"}' },
+          { role: 'user', content: 'continue' },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const [_targetUrl, options] = fetchMock.mock.calls[0] as [string, any];
+    const forwardedBody = JSON.parse(options.body);
+    expect(Array.isArray(forwardedBody.messages)).toBe(true);
+
+    const userMessages = forwardedBody.messages.filter((item: any) => item?.role === 'user');
+    expect(userMessages.length).toBe(1);
+    expect(Array.isArray(userMessages[0]?.content)).toBe(true);
+    expect(userMessages[0].content.filter((part: any) => part?.type === 'tool_result').length).toBe(2);
+    expect(userMessages[0].content.some((part: any) => part?.type === 'tool_result' && part?.tool_use_id === 'call_one')).toBe(true);
+    expect(userMessages[0].content.some((part: any) => part?.type === 'tool_result' && part?.tool_use_id === 'call_two')).toBe(true);
+    expect(userMessages[0].content.some((part: any) => part?.type === 'text' && part?.text === 'continue')).toBe(true);
+  });
+
   it('converts /v1/responses function_call SSE to OpenAI tool_calls on /v1/chat/completions', async () => {
     fetchModelPricingCatalogMock.mockResolvedValue({
       models: [
@@ -1493,6 +1657,47 @@ describe('chat proxy stream behavior', () => {
     expect(matches.length).toBe(1);
   });
 
+  it('emits finish_reason error when /v1/chat/completions receives response.failed from /v1/responses upstream', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'upstream-gpt',
+          supportedEndpointTypes: ['/v1/responses'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    const encoder = new TextEncoder();
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: response.created\ndata: {"type":"response.created","response":{"id":"resp_fail_1","model":"upstream-gpt","created_at":1706000000,"status":"in_progress","output":[]}}\n\n'));
+        controller.enqueue(encoder.encode('event: response.failed\ndata: {"type":"response.failed","response":{"id":"resp_fail_1","model":"upstream-gpt","status":"failed","error":{"message":"tool execution failed"}}}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValue(new Response(upstreamBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'claude-haiku-4-5-20251001',
+        stream: true,
+        messages: [{ role: 'user', content: 'find readme' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('"finish_reason":"error"');
+    expect(response.body).toContain('[DONE]');
+  });
+
   it('preserves non-stream function_call output when /v1/chat/completions falls back to /v1/responses', async () => {
     fetchModelPricingCatalogMock.mockResolvedValue({
       models: [
@@ -1569,7 +1774,7 @@ describe('chat proxy stream behavior', () => {
       method: 'POST',
       url: '/v1/chat/completions',
       payload: {
-        model: 'claude-haiku-4-5-20251001',
+        model: 'gpt-4o-mini',
         stream: false,
         tools: [{
           type: 'function',

@@ -161,6 +161,10 @@ export function normalizeStopReason(raw: unknown): string | null {
   const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   if (!value) return null;
 
+  if (value === 'failed' || value === 'error') {
+    return 'error';
+  }
+
   if (
     value === 'end_turn'
     || value === 'stop'
@@ -800,6 +804,19 @@ export function normalizeUpstreamStreamEvent(
       : extractTextAndReasoning(payload.delta).content;
     return {
       reasoningDelta: deltaText || undefined,
+    };
+  }
+
+  if (type === 'response.failed' || type === 'response.incomplete' || type === 'error') {
+    const responsePayload = isRecord((payload as any).response) ? (payload as any).response : null;
+    const finishReason = normalizeStopReason(
+      (responsePayload as any)?.status
+      ?? (payload as any).status
+      ?? (payload as any).type,
+    ) || 'error';
+    return {
+      finishReason,
+      done: true,
     };
   }
 

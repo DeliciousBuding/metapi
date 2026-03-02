@@ -394,7 +394,63 @@ function convertOpenAiBodyToMessagesBody(
     content: string | Array<Record<string, unknown>>;
   }> = [];
 
-  for (const item of rawMessages) {
+  const appendAssistantMessage = (item: Record<string, unknown>) => {
+    const role = asTrimmedString(item.role).toLowerCase() || 'assistant';
+    if (role !== 'assistant') return;
+
+    const contentBlocks: Array<Record<string, unknown>> = [];
+
+    const textContent = normalizeContentText(item.content).trim();
+    if (textContent) {
+      contentBlocks.push({
+        type: 'text',
+        text: textContent,
+      });
+    }
+
+    const rawToolCalls = Array.isArray(item.tool_calls) ? item.tool_calls : [];
+    for (let index = 0; index < rawToolCalls.length; index += 1) {
+      const toolCall = rawToolCalls[index];
+      if (!isRecord(toolCall)) continue;
+      const functionPart = isRecord(toolCall.function) ? toolCall.function : {};
+
+      const id = asTrimmedString(toolCall.id) || `toolu_${Date.now()}_${index}`;
+      const name = (
+        asTrimmedString(functionPart.name)
+        || asTrimmedString(toolCall.name)
+        || `tool_${index}`
+      );
+      const input = normalizeAnthropicToolInput(functionPart.arguments ?? toolCall.arguments);
+
+      contentBlocks.push({
+        type: 'tool_use',
+        id,
+        name,
+        input,
+      });
+    }
+
+    if (contentBlocks.length <= 0) return;
+
+    if (contentBlocks.length === 1 && contentBlocks[0].type === 'text') {
+      const singleText = asTrimmedString(contentBlocks[0].text);
+      if (singleText) {
+        messages.push({
+          role: 'assistant',
+          content: singleText,
+        });
+      }
+      return;
+    }
+
+    messages.push({
+      role: 'assistant',
+      content: contentBlocks,
+    });
+  };
+
+  for (let messageIndex = 0; messageIndex < rawMessages.length; messageIndex += 1) {
+    const item = rawMessages[messageIndex];
     if (!isRecord(item)) continue;
     const role = asTrimmedString(item.role).toLowerCase() || 'user';
 
@@ -406,73 +462,59 @@ function convertOpenAiBodyToMessagesBody(
     }
 
     if (role === 'tool') {
-      const toolUseId = asTrimmedString(item.tool_call_id) || asTrimmedString(item.id);
-      if (!toolUseId) continue;
+      const toolResultBlocks: Array<Record<string, unknown>> = [];
+      let cursor = messageIndex;
+      while (cursor < rawMessages.length) {
+        const toolCandidate = rawMessages[cursor];
+        if (!isRecord(toolCandidate)) break;
+        const toolRole = asTrimmedString(toolCandidate.role).toLowerCase();
+        if (toolRole !== 'tool') break;
 
-      const toolResultContent = normalizeToolMessageContent(item.content).trim();
-      if (!toolResultContent) continue;
+        const toolUseId = (
+          asTrimmedString(toolCandidate.tool_call_id)
+          || asTrimmedString(toolCandidate.id)
+        );
+        const toolResultContent = normalizeToolMessageContent(toolCandidate.content).trim();
+        if (toolUseId && toolResultContent) {
+          toolResultBlocks.push({
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: toolResultContent,
+          });
+        }
+        cursor += 1;
+      }
 
-      messages.push({
-        role: 'user',
-        content: [{
-          type: 'tool_result',
-          tool_use_id: toolUseId,
-          content: toolResultContent,
-        }],
-      });
+      if (toolResultBlocks.length > 0 && cursor < rawMessages.length) {
+        const nextItem = rawMessages[cursor];
+        if (isRecord(nextItem)) {
+          const nextRole = asTrimmedString(nextItem.role).toLowerCase();
+          if (nextRole === 'user') {
+            const userText = normalizeContentText(nextItem.content).trim();
+            if (userText) {
+              toolResultBlocks.push({
+                type: 'text',
+                text: userText,
+              });
+            }
+            cursor += 1;
+          }
+        }
+      }
+
+      if (toolResultBlocks.length > 0) {
+        messages.push({
+          role: 'user',
+          content: toolResultBlocks,
+        });
+      }
+
+      messageIndex = cursor - 1;
       continue;
     }
 
     if (role === 'assistant') {
-      const contentBlocks: Array<Record<string, unknown>> = [];
-
-      const textContent = normalizeContentText(item.content).trim();
-      if (textContent) {
-        contentBlocks.push({
-          type: 'text',
-          text: textContent,
-        });
-      }
-
-      const rawToolCalls = Array.isArray(item.tool_calls) ? item.tool_calls : [];
-      for (let index = 0; index < rawToolCalls.length; index += 1) {
-        const toolCall = rawToolCalls[index];
-        if (!isRecord(toolCall)) continue;
-        const functionPart = isRecord(toolCall.function) ? toolCall.function : {};
-
-        const id = asTrimmedString(toolCall.id) || `toolu_${Date.now()}_${index}`;
-        const name = (
-          asTrimmedString(functionPart.name)
-          || asTrimmedString(toolCall.name)
-          || `tool_${index}`
-        );
-        const input = normalizeAnthropicToolInput(functionPart.arguments ?? toolCall.arguments);
-
-        contentBlocks.push({
-          type: 'tool_use',
-          id,
-          name,
-          input,
-        });
-      }
-
-      if (contentBlocks.length <= 0) continue;
-
-      if (contentBlocks.length === 1 && contentBlocks[0].type === 'text') {
-        const singleText = asTrimmedString(contentBlocks[0].text);
-        if (singleText) {
-          messages.push({
-            role: 'assistant',
-            content: singleText,
-          });
-        }
-        continue;
-      }
-
-      messages.push({
-        role: 'assistant',
-        content: contentBlocks,
-      });
+      appendAssistantMessage(item);
       continue;
     }
 
@@ -698,9 +740,14 @@ function preferredEndpointOrder(
   }
 
   if (platform === 'openai') {
+    if (preferMessagesForClaudeModel && downstreamFormat !== 'responses') {
+      // Some OpenAI-compatible gateways expose Claude natively via /v1/messages.
+      // Keep chat/responses as fallbacks when messages is unavailable.
+      return ['messages', 'chat', 'responses'];
+    }
     return downstreamFormat === 'responses'
-      ? ['responses', 'chat']
-      : ['chat', 'responses'];
+      ? ['responses', 'chat', 'messages']
+      : ['chat', 'responses', 'messages'];
   }
 
   if (platform === 'claude') {
@@ -780,6 +827,14 @@ export async function resolveUpstreamEndpointCandidates(
       asTrimmedString(item?.modelName).toLowerCase() === modelName.toLowerCase(),
     );
     if (!matched) return preferred;
+
+    const shouldIgnoreCatalogOrderingForClaudeMessages = (
+      preferMessagesForClaudeModel
+      && downstreamFormat !== 'responses'
+    );
+    if (shouldIgnoreCatalogOrderingForClaudeMessages) {
+      return preferred;
+    }
 
     const supportedRaw = Array.isArray(matched.supportedEndpointTypes) ? matched.supportedEndpointTypes : [];
     const normalizedSupportedRaw = supportedRaw
@@ -864,6 +919,7 @@ export function buildUpstreamEndpointRequest(input: {
     }
 
     if (sitePlatform === 'openai') {
+      if (endpoint === 'messages') return '/v1/messages';
       if (endpoint === 'responses') return '/v1/responses';
       return '/v1/chat/completions';
     }
@@ -961,6 +1017,7 @@ export function buildUpstreamEndpointRequest(input: {
 export function isEndpointDowngradeError(status: number, upstreamErrorText?: string | null): boolean {
   if (status < 400) return false;
   const text = (upstreamErrorText || '').toLowerCase();
+  if (status === 404 || status === 405 || status === 501) return true;
   if (!text) return false;
 
   let parsedCode = '';
@@ -982,12 +1039,34 @@ export function isEndpointDowngradeError(status: number, upstreamErrorText?: str
 
   return (
     text.includes('convert_request_failed')
+    || text.includes('not found')
+    || text.includes('unknown endpoint')
+    || text.includes('unsupported endpoint')
+    || text.includes('unsupported path')
+    || text.includes('unrecognized request url')
+    || text.includes('no route matched')
+    || text.includes('does not exist')
+    || (status === 400 && text.includes('unsupported'))
     || text.includes('not implemented')
     || text.includes('api not implemented')
     || text.includes('unsupported legacy protocol')
     || parsedCode === 'convert_request_failed'
+    || parsedCode === 'not_found'
+    || parsedCode === 'endpoint_not_found'
+    || parsedCode === 'unknown_endpoint'
+    || parsedCode === 'unsupported_endpoint'
     || parsedCode === 'bad_response_status_code'
+    || parsedType === 'not_found_error'
+    || parsedType === 'invalid_request_error'
+    || parsedType === 'unsupported_endpoint'
+    || parsedType === 'unsupported_path'
     || parsedType === 'bad_response_status_code'
+    || parsedMessage.includes('unknown endpoint')
+    || parsedMessage.includes('unsupported endpoint')
+    || parsedMessage.includes('unsupported path')
+    || parsedMessage.includes('unrecognized request url')
+    || parsedMessage.includes('no route matched')
+    || parsedMessage.includes('does not exist')
     || parsedMessage.includes('bad_response_status_code')
   );
 }
