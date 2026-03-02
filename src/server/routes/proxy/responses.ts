@@ -595,7 +595,7 @@ function emitResponsesEvent(
 
 function buildResponseObject(
   state: ResponsesStreamState,
-  status: 'in_progress' | 'completed',
+  status: 'in_progress' | 'completed' | 'failed',
   usage?: UsageSummary,
 ): Record<string, unknown> {
   const response: Record<string, unknown> = {
@@ -837,6 +837,44 @@ function completeResponsesStream(
   return events;
 }
 
+function failResponsesStream(
+  state: ResponsesStreamState,
+  streamContext: { id: string; model: string; created: number },
+  usage: UsageSummary,
+  payload?: unknown,
+): string[] {
+  if (state.completed) return [];
+
+  const events: string[] = [];
+  events.push(...ensureResponsesStarted(state, streamContext));
+
+  const responsePayload = isRecord(payload) && isRecord((payload as any).response)
+    ? ((payload as any).response as Record<string, unknown>)
+    : null;
+  const errorPayload = isRecord(payload) && isRecord((payload as any).error)
+    ? ((payload as any).error as Record<string, unknown>)
+    : null;
+
+  if (responsePayload && asTrimmedString(responsePayload.id)) {
+    state.responseId = ensureResponseId(asTrimmedString(responsePayload.id));
+  }
+  if (responsePayload && asTrimmedString(responsePayload.model)) {
+    state.model = asTrimmedString(responsePayload.model);
+  }
+
+  const failedResponse = buildResponseObject(state, 'failed', usage);
+  if (errorPayload) {
+    failedResponse.error = errorPayload;
+  }
+
+  events.push(emitResponsesEvent(state, 'response.failed', {
+    response: failedResponse,
+  }));
+  events.push('data: [DONE]\n\n');
+  state.completed = true;
+  return events;
+}
+
 function serializeConvertedResponsesEvents(input: {
   state: ResponsesStreamState;
   streamContext: { id: string; model: string; created: number };
@@ -930,6 +968,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
         },
         modelName,
         'responses',
+        requestedModel,
       );
       if (endpointCandidates.length === 0) {
         endpointCandidates.push('responses', 'chat', 'messages');
@@ -1046,7 +1085,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
               if (eventBlock.data === '[DONE]') {
                 if (passthroughResponsesStream) {
                   reply.raw.write('data: [DONE]\n\n');
-                } else {
+                } else if (!responsesState.completed) {
                   writeLines(completeResponsesStream(responsesState, streamContext, parsedUsage));
                 }
                 continue;
@@ -1066,6 +1105,20 @@ export async function responsesProxyRoute(app: FastifyInstance) {
               if (passthroughResponsesStream) {
                 const eventName = eventBlock.event ? `event: ${eventBlock.event}\n` : '';
                 reply.raw.write(`${eventName}data: ${eventBlock.data}\n\n`);
+                continue;
+              }
+
+              const payloadType = (isRecord(parsedPayload) && typeof parsedPayload.type === 'string')
+                ? parsedPayload.type
+                : '';
+              const isFailureEvent = (
+                eventBlock.event === 'error'
+                || eventBlock.event === 'response.failed'
+                || payloadType === 'error'
+                || payloadType === 'response.failed'
+              );
+              if (isFailureEvent) {
+                writeLines(failResponsesStream(responsesState, streamContext, parsedUsage, parsedPayload));
                 continue;
               }
 
@@ -1107,7 +1160,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
             }
           } finally {
             reader.releaseLock();
-            if (!passthroughResponsesStream) {
+            if (!passthroughResponsesStream && !responsesState.completed) {
               writeLines(completeResponsesStream(responsesState, streamContext, parsedUsage));
             }
             reply.raw.end();
@@ -1252,5 +1305,7 @@ function logProxy(
       errorMessage: normalizedErrorMessage,
       retryCount,
     }).run();
-  } catch {}
+  } catch (error) {
+    console.warn('[proxy/responses] failed to write proxy log', error);
+  }
 }

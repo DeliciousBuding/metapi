@@ -30,6 +30,12 @@ function normalizePlatformName(platform: unknown): string {
   return asTrimmedString(platform).toLowerCase();
 }
 
+function isClaudeFamilyModel(modelName: string): boolean {
+  const normalized = asTrimmedString(modelName).toLowerCase();
+  if (!normalized) return false;
+  return normalized === 'claude' || normalized.startsWith('claude-') || normalized.includes('claude');
+}
+
 function headerValueToString(value: unknown): string | null {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -679,7 +685,11 @@ function normalizeEndpointTypes(value: unknown): UpstreamEndpoint[] {
   return Array.from(normalized);
 }
 
-function preferredEndpointOrder(downstreamFormat: EndpointPreference, sitePlatform?: string): UpstreamEndpoint[] {
+function preferredEndpointOrder(
+  downstreamFormat: EndpointPreference,
+  sitePlatform?: string,
+  preferMessagesForClaudeModel = false,
+): UpstreamEndpoint[] {
   const platform = normalizePlatformName(sitePlatform);
 
   if (platform === 'gemini') {
@@ -707,6 +717,11 @@ function preferredEndpointOrder(downstreamFormat: EndpointPreference, sitePlatfo
     return ['messages', 'chat', 'responses'];
   }
 
+  if (downstreamFormat === 'openai' && preferMessagesForClaudeModel) {
+    // Claude-family models are most stable with native Messages semantics.
+    return ['messages', 'chat', 'responses'];
+  }
+
   return ['chat', 'messages', 'responses'];
 }
 
@@ -714,8 +729,13 @@ export async function resolveUpstreamEndpointCandidates(
   context: ChannelContext,
   modelName: string,
   downstreamFormat: EndpointPreference,
+  requestedModelHint?: string,
 ): Promise<UpstreamEndpoint[]> {
   const sitePlatform = normalizePlatformName(context.site.platform);
+  const preferMessagesForClaudeModel = (
+    isClaudeFamilyModel(modelName)
+    || isClaudeFamilyModel(asTrimmedString(requestedModelHint))
+  );
   if (sitePlatform === 'anyrouter') {
     // anyrouter deployments are effectively anthropic-protocol first.
     return downstreamFormat === 'responses'
@@ -723,7 +743,17 @@ export async function resolveUpstreamEndpointCandidates(
       : ['messages', 'chat'];
   }
 
-  const preferred = preferredEndpointOrder(downstreamFormat, context.site.platform);
+  const preferred = preferredEndpointOrder(
+    downstreamFormat,
+    context.site.platform,
+    preferMessagesForClaudeModel,
+  );
+  const forceMessagesFirstForClaudeModel = (
+    downstreamFormat === 'openai'
+    && preferMessagesForClaudeModel
+    && sitePlatform !== 'openai'
+    && sitePlatform !== 'gemini'
+  );
 
   try {
     const catalog = await fetchModelPricingCatalog({
@@ -752,6 +782,25 @@ export async function resolveUpstreamEndpointCandidates(
     if (!matched) return preferred;
 
     const supportedRaw = Array.isArray(matched.supportedEndpointTypes) ? matched.supportedEndpointTypes : [];
+    const normalizedSupportedRaw = supportedRaw
+      .map((item) => asTrimmedString(item).toLowerCase())
+      .filter((item) => item.length > 0);
+    const hasConcreteEndpointHint = normalizedSupportedRaw.some((raw) => (
+      raw.includes('/v1/messages')
+      || raw.includes('/v1/chat/completions')
+      || raw.includes('/v1/responses')
+      || raw === 'messages'
+      || raw === 'chat'
+      || raw === 'chat_completions'
+      || raw === 'completions'
+      || raw === 'responses'
+    ));
+    if (forceMessagesFirstForClaudeModel && !hasConcreteEndpointHint) {
+      // Generic labels like openai/anthropic are too coarse for Claude models;
+      // keep messages-first order in this case.
+      return preferred;
+    }
+
     const supported = new Set<UpstreamEndpoint>();
     for (const endpoint of supportedRaw) {
       const normalizedList = normalizeEndpointTypes(endpoint);

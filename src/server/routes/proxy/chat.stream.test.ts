@@ -724,6 +724,49 @@ describe('chat proxy stream behavior', () => {
     expect(response.body).toContain('response.completed');
   });
 
+  it('emits response.failed without synthetic response.completed when upstream stream fails on /v1/responses', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'upstream-gpt',
+          supportedEndpointTypes: ['/v1/chat/completions'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    const encoder = new TextEncoder();
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"id":"chatcmpl-r3","model":"upstream-gpt","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'));
+        controller.enqueue(encoder.encode('event: error\ndata: {"type":"error","error":{"message":"upstream stream failed","type":"upstream_error"}}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValue(new Response(upstreamBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/responses',
+      payload: {
+        model: 'gpt-5.2',
+        input: 'hello',
+        stream: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('response.failed');
+    expect(response.body).toContain('"status":"failed"');
+    expect(response.body).not.toContain('response.completed');
+    expect(response.body).toContain('[DONE]');
+  });
+
   it('preserves Responses-specific payload fields and forwards openai headers on /v1/responses', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({
       id: 'resp_passthrough',
@@ -1666,7 +1709,7 @@ describe('chat proxy stream behavior', () => {
     expect(targetUrl).toContain('/v1/messages');
   });
 
-  it('prefers OpenAI-compatible endpoint when catalog uses generic openai/anthropic labels', async () => {
+  it('prefers Messages endpoint for claude-family models when catalog uses generic openai/anthropic labels', async () => {
     fetchModelPricingCatalogMock.mockResolvedValue({
       models: [
         {
@@ -1678,16 +1721,12 @@ describe('chat proxy stream behavior', () => {
     });
 
     fetchMock.mockResolvedValue(new Response(JSON.stringify({
-      id: 'chatcmpl-openai-first',
-      object: 'chat.completion',
-      created: 1_706_000_002,
+      id: 'msg-claude-first',
+      type: 'message',
       model: 'upstream-gpt',
-      choices: [{
-        index: 0,
-        message: { role: 'assistant', content: 'hello from openai endpoint' },
-        finish_reason: 'stop',
-      }],
-      usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+      content: [{ type: 'text', text: 'hello from messages endpoint' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 },
     }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -1705,11 +1744,11 @@ describe('chat proxy stream behavior', () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body?.choices?.[0]?.message?.content).toContain('hello from openai endpoint');
+    expect(body?.choices?.[0]?.message?.content).toContain('hello from messages endpoint');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [targetUrl] = fetchMock.mock.calls[0] as [string, any];
-    expect(targetUrl).toContain('/v1/chat/completions');
+    expect(targetUrl).toContain('/v1/messages');
   });
 
   it('falls back to /v1/messages when catalog only declares openai and chat endpoint fails', async () => {
@@ -1750,7 +1789,7 @@ describe('chat proxy stream behavior', () => {
       method: 'POST',
       url: '/v1/chat/completions',
       payload: {
-        model: 'claude-haiku-4-5-20251001',
+        model: 'gpt-4o-mini',
         stream: false,
         messages: [{ role: 'user', content: 'hello' }],
       },
@@ -1805,7 +1844,7 @@ describe('chat proxy stream behavior', () => {
       method: 'POST',
       url: '/v1/chat/completions',
       payload: {
-        model: 'claude-haiku-4-5-20251001',
+        model: 'gpt-4o-mini',
         stream: false,
         messages: [{ role: 'user', content: 'hello' }],
       },
@@ -1860,7 +1899,7 @@ describe('chat proxy stream behavior', () => {
       method: 'POST',
       url: '/v1/chat/completions',
       payload: {
-        model: 'claude-haiku-4-5-20251001',
+        model: 'gpt-4o-mini',
         stream: false,
         messages: [{ role: 'user', content: 'hello' }],
       },

@@ -145,7 +145,7 @@ The AI ecosystem is seeing a growing number of aggregation relay stations based 
 **Downstream Clients** (Cursor · Claude Code · Codex · Open WebUI · Cherry Studio, etc.)
 &emsp;↓ &ensp;`Authorization: Bearer <PROXY_TOKEN>`
 **Metapi Gateway**
-&emsp;• Unified Proxy `/v1/*` — compatible with all OpenAI / Claude endpoints
+&emsp;• Unified `/v1` proxy for core OpenAI / Claude-compatible endpoints (Responses, Chat Completions, Messages, Completions, Embeddings, Images, Models)
 &emsp;• Smart Routing Engine — weighted selection by cost, balance, and availability; auto-cooldown & retry on failure
 &emsp;• Model Discovery — auto-aggregates all upstream models with zero config
 &emsp;• Format Conversion — transparent bidirectional OpenAI ⇄ Claude conversion
@@ -160,7 +160,7 @@ The AI ecosystem is seeing a growing number of aggregation relay stations based 
 ### Unified Proxy Gateway
 
 - Compatible with **OpenAI** and **Claude** downstream formats, works with all mainstream clients
-- Supports Responses / Chat Completions / Messages / Completions (Legacy) / Embeddings / Images / Models — full API coverage
+- Supports Responses / Chat Completions / Messages / Completions (Legacy) / Embeddings / Images / Models (current core coverage)
 - Full SSE streaming support with automatic format conversion (OpenAI <-> Claude)
 
 ### Smart Routing Engine

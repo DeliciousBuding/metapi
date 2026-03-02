@@ -257,6 +257,8 @@ function logProxy(
       errorMessage,
       retryCount,
     }).run();
-  } catch {}
+  } catch (error) {
+    console.warn('[proxy/completions] failed to write proxy log', error);
+  }
 }
 

@@ -39,12 +39,12 @@
 </p>
 
 <p align="center">
-  <a href="docs/index.md"><strong>📚 文档中心</strong></a> ·
-  <a href="docs/getting-started.md">快速上手</a> ·
-  <a href="docs/deployment.md">部署指南</a> ·
-  <a href="docs/configuration.md">配置说明</a> ·
-  <a href="docs/faq.md">常见问题</a> ·
-  <a href="CONTRIBUTING.md">贡献指南</a>
+  <a href="https://metapi.cita777.me"><strong>📚 在线文档</strong></a> ·
+  <a href="https://metapi.cita777.me/getting-started">快速上手</a> ·
+  <a href="https://metapi.cita777.me/deployment">部署指南</a> ·
+  <a href="https://metapi.cita777.me/configuration">配置说明</a> ·
+  <a href="https://metapi.cita777.me/client-integration">客户端接入</a> ·
+  <a href="https://metapi.cita777.me/faq">常见问题</a>
 </p>
 
 </div>
@@ -166,9 +166,9 @@ graph LR
 
     %% 节点定义
     C["<b>💻 下游客户端</b><br/><br/>Cursor · Claude Code<br/>Codex · Open WebUI<br/>Cherry Studio"]:::client
-    
+
     G["<b>🚀 Metapi 网关</b><br/>────────────────────────<br/>✨ <b>统一代理</b>：兼容 OpenAI / Claude 全接口<br/>🧠 <b>智能路由</b>：按成本、余额、可用率加权，失败重试<br/>🔍 <b>模型发现</b>：自动聚合上游全部模型，零配置接入<br/>🔄 <b>格式转换</b>：OpenAI ⇄ Claude 双向透明转换<br/>📊 <b>运维管理</b>：自动签到 · 余额管理 · 告警 · 看板"]:::gateway
-    
+
     U["<b>☁️ 上游平台</b><br/><br/>New API · One API<br/>OneHub · DoneHub<br/>Veloera · AnyRouter<br/>Sub2API 等"]:::upstream
 
     %% 连线
@@ -236,54 +236,16 @@ graph LR
   <p><sub>模型广场 — 一站式浏览所有可用模型的覆盖率、定价和性能指标</sub></p>
 </div>
 
-### ✅ 自动签到
+### ✅ 自动签到 · 💰 余额管理 · 🔔 告警通知 · 📊 数据看板
 
-- Cron 定时自动签到（默认每天 08:00）
-- 智能解析签到奖励金额，签到失败自动通知
-- 逐账号独立执行，支持启用/禁用控制
-- 完整的签到日志记录，支持历史查询
-- 并发锁机制，防止重复签到
-
-### 💰 余额管理
-
-- 定时余额刷新（默认每小时），批量更新所有活跃账号
-- 收入追踪：记录每日/累计收入，追踪额度消耗趋势
-- 余额兜底估算：API 不可用时，从代理日志推算余额变动
-- 自动重登录：凭证过期时自动刷新
-
-### 🔔 告警与通知
-
-支持四种通知渠道：
-
-| 渠道                | 说明                 |
-| ------------------- | -------------------- |
-| **Webhook**   | 自定义 HTTP 推送     |
-| **Bark**      | iOS 推送通知         |
-| **Server酱**  | 微信 / Telegram 通知 |
-| **SMTP 邮件** | 标准邮件通知         |
-
-告警场景覆盖：余额不足预警、站点/账号异常、签到失败、代理请求失败、Token 过期提醒、每日摘要报告。支持告警冷却机制（默认 300 秒），防止相同事件重复通知。
-
-### 📊 数据看板
-
-- 站点余额分布饼图、每日消费趋势图表
-- 全局搜索（站点、账号、模型）
-- 系统事件日志、代理请求日志（含模型、状态、延迟、Token 消耗、成本估算）
+- **自动签到**：Cron 定时执行，智能解析奖励金额，签到失败自动通知
+- **余额管理**：定时刷新，收入追踪，余额兜底估算，凭证过期自动重登录
+- **告警通知**：支持 Webhook / Bark / Server酱 / SMTP 邮件，覆盖余额不足、站点异常、签到失败等场景
+- **数据看板**：余额分布饼图、消费趋势图表、全局搜索、代理请求日志
 
 <div align="center">
   <img src="docs/screenshots/dashboard.png" alt="dashboard-detail" width="700"/>
   <p><sub>数据看板 — 余额分布、消费趋势、系统健康状态一目了然</sub></p>
-</div>
-
-### 🔬 模型操练场
-
-- 在线交互式对话测试，即时验证模型可用性与响应质量
-- 支持选择任意已路由模型，对比不同通道的输出效果
-- 流式 / 非流式双模式测试
-
-<div align="center">
-  <img src="docs/screenshots/playground.png" alt="playground-detail" width="700"/>
-  <p><sub>模型操练场 — 在线交互式测试，验证模型可用性与响应质量</sub></p>
 </div>
 
 ### 📦 轻量部署
@@ -296,336 +258,28 @@ graph LR
 
 ## 🚀 快速开始
 
-### Zeabur 一键部署
-
 <a href="https://zeabur.com/templates/DOX5PR">
   <img alt="Deploy on Zeabur" src="https://zeabur.com/button.svg" height="28">
 </a>
 
-点击按钮即可一键部署到 [Zeabur](https://zeabur.com)，自动配置容器、持久化存储和域名，部署后按提示填写 `AUTH_TOKEN` 和 `PROXY_TOKEN` 即可使用。
-
-### Docker Compose（推荐）
-
 ```bash
-mkdir metapi && cd metapi
-
-cat > docker-compose.yml << 'EOF'
-services:
-  metapi:
-    image: 1467078763/metapi:latest
-    ports:
-      - "4000:4000"
-    volumes:
-      - ./data:/app/data
-    environment:
-      AUTH_TOKEN: ${AUTH_TOKEN:?AUTH_TOKEN is required}
-      PROXY_TOKEN: ${PROXY_TOKEN:?PROXY_TOKEN is required}
-      CHECKIN_CRON: "0 8 * * *"
-      BALANCE_REFRESH_CRON: "0 * * * *"
-      PORT: ${PORT:-4000}
-      DATA_DIR: /app/data
-      TZ: ${TZ:-Asia/Shanghai}
-    restart: unless-stopped
-EOF
-
-# 设置令牌并启动
-# AUTH_TOKEN = 管理后台初始管理员令牌（登录后台时输入这个值）
-export AUTH_TOKEN=your-admin-token
-# PROXY_TOKEN = 下游客户端调用 /v1/* 使用的令牌
-export PROXY_TOKEN=your-proxy-sk-token
-docker compose up -d
-```
-
-<details>
-<summary><strong>Docker 命令一行启动</strong></summary>
-
-```bash
-docker run -d --name metapi \
-  -p 4000:4000 \
+docker run -d --name metapi -p 4000:4000 \
   -e AUTH_TOKEN=your-admin-token \
   -e PROXY_TOKEN=your-proxy-sk-token \
-  -e TZ=Asia/Shanghai \
-  -v ./data:/app/data \
-  --restart unless-stopped \
+  -v ./data:/app/data --restart unless-stopped \
   1467078763/metapi:latest
 ```
 
-</details>
-
-🎉 启动后访问 `http://localhost:4000`，用 `AUTH_TOKEN` 登录即可！
+启动后访问 `http://localhost:4000`，用 `AUTH_TOKEN` 登录即可。
 
 > [!IMPORTANT]
-> 请务必修改 `AUTH_TOKEN` 和 `PROXY_TOKEN`，不要使用默认值。数据存储在 `./data` 目录中，升级不影响已有数据。
+> 请务必修改 `AUTH_TOKEN` 和 `PROXY_TOKEN`，不要使用默认值。
 
-> [!TIP]
-> 初始管理员令牌就是启动时配置的 `AUTH_TOKEN`。  
-> 如果是非 Compose 场景且你没有显式设置 `AUTH_TOKEN`，默认值为 `change-me-admin-token`（仅用于本地调试）。  
-> 若你在后台「设置」里修改过管理员令牌，后续登录请使用修改后的新令牌。
+📖 **[完整部署文档](https://metapi.cita777.me/deployment)** — Zeabur 一键部署 / Docker Compose / Release 包 / 反向代理 / 升级回滚
 
-### Release 包启动（Linux / macOS / Windows）
+📖 **[环境变量与配置](https://metapi.cita777.me/configuration)** — 全部环境变量、路由参数、通知渠道
 
-如果你不想用 Docker，也可以直接下载预打包的 Release 产物运行：
-
-1. 打开 [Releases](https://github.com/cita-777/metapi/releases) 下载与你系统匹配的压缩包
-2. 解压后进入目录
-3. 设置环境变量并启动
-
-Linux / macOS：
-
-```bash
-export AUTH_TOKEN=your-admin-token
-export PROXY_TOKEN=your-proxy-sk-token
-export PORT=4000
-export DATA_DIR=./data
-./start.sh
-```
-
-Windows（PowerShell）：
-
-```powershell
-$env:AUTH_TOKEN="your-admin-token"
-$env:PROXY_TOKEN="your-proxy-sk-token"
-$env:PORT="4000"
-$env:DATA_DIR="./data"
-.\start.bat
-```
-
-`start.sh` / `start.bat` 的作用是：
-
-- 先检查 `better-sqlite3` 与当前 Node.js ABI 是否兼容
-- 若检测到 ABI 不匹配，会自动尝试 `npm rebuild better-sqlite3`
-- 若重建失败，会回退到 `npm ci --omit=dev` 重新安装运行时依赖
-- 最后执行数据库迁移并启动服务
-
-> [!NOTE]
-> Release 包依赖本机安装 Node.js（支持 20+，推荐 22 LTS）。  
-> 如果本机 Node 主版本与打包时不同（例如包内依赖基于 Node 22，而本机是 Node 24），首次启动可能触发自动重建，需联网。
-
-### 升级
-
-```bash
-docker compose pull && docker compose up -d && docker image prune -f
-```
-
-📖 更详细的部署方式请参考 [部署指南](docs/deployment.md)
-
----
-
-## 📚 文档中心
-
-> 文档站（VitePress）本地预览：
->
-> ```bash
-> npm run docs:dev
-> ```
->
-> 文档站构建：
->
-> ```bash
-> npm run docs:build
-> ```
->
-> GitHub Actions 自动发布：推送到 `main` 分支后，会执行 `.github/workflows/docs-pages.yml` 并部署到 GitHub Pages。
-> 首次使用需在仓库设置中开启：
-> `Settings -> Pages -> Build and deployment -> Source: GitHub Actions`
-
-| 分类          | 链接                                                  | 说明                                   |
-| ------------- | ----------------------------------------------------- | -------------------------------------- |
-| 🏠 文档站首页 | [docs/index.md](docs/index.md)                         | 可发布文档站入口（导航/侧栏/搜索）     |
-| 📖 文档总览   | [docs/README.md](docs/README.md)                       | 文档导航与索引                         |
-| 🚀 快速上手   | [docs/getting-started.md](docs/getting-started.md)     | 10 分钟启动                            |
-| 🚢 部署指南   | [docs/deployment.md](docs/deployment.md)               | Docker Compose、反向代理、升级回滚     |
-| ⚙️ 配置说明 | [docs/configuration.md](docs/configuration.md)         | 全部环境变量与路由参数                 |
-| 🔌 客户端接入 | [docs/client-integration.md](docs/client-integration.md) | Open WebUI / Cherry Studio / Cursor 等 |
-| 🔧 运维手册   | [docs/operations.md](docs/operations.md)               | 备份恢复、日志排查、健康检查           |
-| ❓ 常见问题   | [docs/faq.md](docs/faq.md)                             | 常见报错与修复路径                     |
-| 🧩 经验沉淀规范 | [docs/community/faq-tutorial-guidelines.md](docs/community/faq-tutorial-guidelines.md) | FAQ 与教程提交流程、模板与命名规则 |
-
----
-
-## ⚙️ 环境变量
-
-### 基础配置
-
-| 变量名                        | 说明                                        | 默认值                  |
-| ----------------------------- | ------------------------------------------- | ----------------------- |
-| `AUTH_TOKEN`                | 管理后台登录令牌（**必须修改**）      | `change-me-admin-token`           |
-| `PROXY_TOKEN`               | 代理 API Bearer Token（**必须修改**） | `change-me-proxy-sk-token`     |
-| `PORT`                      | 服务监听端口                                | `4000`                |
-| `DATA_DIR`                  | 数据目录（SQLite 数据库）                   | `./data`              |
-| `TZ`                        | 时区                                        | `Asia/Shanghai`       |
-| `ACCOUNT_CREDENTIAL_SECRET` | 账号凭证加密密钥                            | 默认使用 `AUTH_TOKEN` |
-
-### 定时任务
-
-| 变量名                   | 说明                 | 默认值        |
-| ------------------------ | -------------------- | ------------- |
-| `CHECKIN_CRON`         | 自动签到 Cron 表达式 | `0 8 * * *` |
-| `BALANCE_REFRESH_CRON` | 余额刷新 Cron 表达式 | `0 * * * *` |
-
-<details>
-<summary><strong>智能路由参数</strong></summary>
-
-| 变量名                         | 说明                   | 默认值  |
-| ------------------------------ | ---------------------- | ------- |
-| `ROUTING_FALLBACK_UNIT_COST` | 无成本信号时的默认单价 | `1`   |
-| `BASE_WEIGHT_FACTOR`         | 基础权重因子           | `0.5` |
-| `VALUE_SCORE_FACTOR`         | 性价比评分因子         | `0.5` |
-| `COST_WEIGHT`                | 路由选择中成本权重     | `0.4` |
-| `BALANCE_WEIGHT`             | 路由选择中余额权重     | `0.3` |
-| `USAGE_WEIGHT`               | 路由选择中使用率权重   | `0.3` |
-
-</details>
-
-<details>
-<summary><strong>通知渠道配置</strong></summary>
-
-| 变量名                        | 说明                   | 默认值    |
-| ----------------------------- | ---------------------- | --------- |
-| `WEBHOOK_ENABLED`           | 启用 Webhook 通知      | `true`  |
-| `WEBHOOK_URL`               | Webhook 推送地址       | 空        |
-| `BARK_ENABLED`              | 启用 Bark 推送         | `true`  |
-| `BARK_URL`                  | Bark 推送地址          | 空        |
-| `SERVERCHAN_ENABLED`        | 启用 Server酱 通知     | `true`  |
-| `SERVERCHAN_KEY`            | Server酱 SendKey       | 空        |
-| `SMTP_ENABLED`              | 启用邮件通知           | `false` |
-| `SMTP_HOST`                 | SMTP 服务器地址        | 空        |
-| `SMTP_PORT`                 | SMTP 端口              | `587`   |
-| `SMTP_SECURE`               | 使用 SSL/TLS           | `false` |
-| `SMTP_USER` / `SMTP_PASS` | SMTP 认证              | 空        |
-| `SMTP_FROM` / `SMTP_TO`   | 发件/收件人            | 空        |
-| `NOTIFY_COOLDOWN_SEC`       | 相同告警冷却时间（秒） | `300`   |
-
-</details>
-
-<details>
-<summary><strong>安全配置</strong></summary>
-
-| 变量名                 | 说明                         | 默认值       |
-| ---------------------- | ---------------------------- | ------------ |
-| `ADMIN_IP_ALLOWLIST` | 管理端 IP 白名单（逗号分隔） | 空（不限制） |
-
-</details>
-
-📖 完整配置说明：[docs/configuration.md](docs/configuration.md)
-
----
-
-## 📡 代理接口
-
-Metapi 对下游暴露标准 OpenAI / Claude 兼容接口：
-
-| 接口                       | 方法 | 说明                         |
-| -------------------------- | ---- | ---------------------------- |
-| `/v1/responses`          | POST | OpenAI Responses             |
-| `/v1/chat/completions`   | POST | OpenAI Chat Completions      |
-| `/v1/messages`           | POST | Claude Messages              |
-| `/v1/completions`        | POST | OpenAI Completions（Legacy） |
-| `/v1/embeddings`         | POST | 向量嵌入                     |
-| `/v1/images/generations` | POST | 图像生成                     |
-| `/v1/models`             | GET  | 获取所有可用模型列表         |
-
-请求头携带 `Authorization: Bearer <PROXY_TOKEN>` 即可访问。
-
-默认可使用全局 `PROXY_TOKEN`。  
-从 `系统设置 -> 下游 API Key 策略` 可创建多个项目级下游 Key，并单独配置：
-
-- 过期时间（ExpireAt）
-- 费用上限与请求上限（MaxCost / MaxRequests）
-- 模型白名单（SupportedModels，支持 exact/glob/re:regex）
-- 路由白名单（AllowedRouteIds）
-- 站点倍率（SiteWeightMultipliers，用于控制不同项目的上游偏好占比）
-
----
-
-## 🔌 接入下游客户端
-
-适用于所有兼容 OpenAI API 的客户端：
-
-| 配置项             | 值                                                          |
-| ------------------ | ----------------------------------------------------------- |
-| **Base URL** | `https://your-domain.com`（客户端一般会自动拼接 `/v1`） |
-| **API Key**  | 你设置的 `PROXY_TOKEN` 值                                 |
-| **模型列表** | 自动从 `GET /v1/models` 获取                              |
-
-### CLI 快速配置（Claude Code / Codex）
-
-#### Claude Code（`~/.claude/settings.json`）
-
-```json
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://your-domain.com",
-    "ANTHROPIC_API_KEY": "your-proxy-sk-token",
-    "ANTHROPIC_AUTH_TOKEN": "your-proxy-sk-token",
-    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
-  }
-}
-```
-
-> 说明：不同版本客户端可能读取 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN`，建议同时设置。
-
-#### Codex（`~/.codex/config.toml` + `~/.codex/auth.json`）
-
-`~/.codex/config.toml`
-
-```toml
-model = "gpt-5"
-model_provider = "metapi"
-
-[model_providers.metapi]
-name = "metapi"
-base_url = "https://your-domain.com/v1"
-```
-
-`~/.codex/auth.json`
-
-```json
-{
-  "OPENAI_API_KEY": "your-proxy-sk-token"
-}
-```
-
-> 提示：`model` 需要是你在 Metapi `GET /v1/models` 可见的模型名。
-
-### 已验证兼容的客户端
-
-- [ChatGPT-Next-Web](https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web)
-- [Open WebUI](https://github.com/open-webui/open-webui)
-- [Cherry Studio](https://github.com/kangfenmao/cherry-studio)
-- [Cursor](https://cursor.sh)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- Codex CLI
-- [Roo Code](https://github.com/RooVetGit/Roo-Code)
-- [Kilo Code](https://github.com/kilocode/kilocode)
-- 以及所有支持 OpenAI API 格式的客户端
-
-<details>
-<summary><strong>常见问题：流式响应异常</strong></summary>
-
-如果非流式正常但流式异常，请排查：
-
-1. 反向代理是否关闭了 SSE 缓冲（Nginx 需设置 `proxy_buffering off`）
-2. 中间层是否改写了 `text/event-stream` Content-Type
-3. 客户端是否强制要求特定流式格式
-
-**Nginx 参考配置：**
-
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:4000;
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_set_header Connection '';
-    proxy_http_version 1.1;
-    chunked_transfer_encoding off;
-}
-```
-
-</details>
-
-📖 更详细的接入说明：[docs/client-integration.md](docs/client-integration.md)
+📖 **[客户端接入指南](https://metapi.cita777.me/client-integration)** — Cursor / Claude Code / Codex / Open WebUI 等配置方法
 
 ---
 

@@ -142,6 +142,8 @@ function logProxy(
       errorMessage,
       retryCount,
     }).run();
-  } catch {}
+  } catch (error) {
+    console.warn('[proxy/images] failed to write proxy log', error);
+  }
 }
 

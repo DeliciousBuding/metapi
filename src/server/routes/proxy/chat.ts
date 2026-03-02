@@ -170,6 +170,7 @@ async function handleChatProxyRequest(
       },
       modelName,
       downstreamFormat,
+      requestedModel,
     );
     let startTime = Date.now();
 
@@ -664,5 +665,7 @@ function logProxy(
       errorMessage: normalizedErrorMessage,
       retryCount,
     }).run();
-  } catch {}
+  } catch (error) {
+    console.warn('[proxy/chat] failed to write proxy log', error);
+  }
 }

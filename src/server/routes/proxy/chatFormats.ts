@@ -188,7 +188,7 @@ export function normalizeStopReason(raw: unknown): string | null {
     return 'tool_calls';
   }
 
-  return 'stop';
+  return null;
 }
 
 export function toClaudeStopReason(finishReason: string | null | undefined): string {

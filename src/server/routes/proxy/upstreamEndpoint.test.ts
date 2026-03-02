@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const fetchModelPricingCatalogMock = vi.fn(async (_arg?: unknown) => null);
+const fetchModelPricingCatalogMock = vi.fn(async (_arg?: unknown): Promise<any> => null);
 
 vi.mock('../../services/modelPricingService.js', () => ({
   fetchModelPricingCatalog: (arg: unknown) => fetchModelPricingCatalogMock(arg),
@@ -58,6 +58,41 @@ describe('resolveUpstreamEndpointCandidates', () => {
       'responses',
     );
     expect(responsesOrder).toEqual(['responses', 'chat', 'messages']);
+  });
+
+  it('prioritizes messages-first for claude-family models on openai downstream', async () => {
+    fetchModelPricingCatalogMock.mockResolvedValue({
+      models: [
+        {
+          modelName: 'claude-opus-4-6',
+          supportedEndpointTypes: ['anthropic', 'openai'],
+        },
+      ],
+      groupRatio: {},
+    });
+
+    const order = await resolveUpstreamEndpointCandidates(
+      {
+        ...baseContext,
+        site: { ...baseContext.site, platform: 'new-api' },
+      },
+      'claude-opus-4-6',
+      'openai',
+    );
+
+    expect(order).toEqual(['messages', 'chat', 'responses']);
+
+    const aliasedOrder = await resolveUpstreamEndpointCandidates(
+      {
+        ...baseContext,
+        site: { ...baseContext.site, platform: 'new-api' },
+      },
+      'upstream-gpt',
+      'openai',
+      'claude-haiku-4-5-20251001',
+    );
+
+    expect(aliasedOrder).toEqual(['messages', 'chat', 'responses']);
   });
 
   it('keeps explicit platform priority rules', async () => {
