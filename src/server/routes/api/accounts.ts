@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../../db/index.js';
-import { and, eq, gte, lt } from 'drizzle-orm';
+import { and, eq, gte, lt, sql } from 'drizzle-orm';
 import { refreshBalance } from '../../services/balanceService.js';
 import { getAdapter } from '../../services/platforms/index.js';
 import { refreshModelsForAccount, rebuildTokenRoutesFromAvailability } from '../../services/modelService.js';
@@ -159,18 +159,25 @@ export async function accountsRoutes(app: FastifyInstance) {
     const { localDay, startUtc, endUtc } = getLocalDayRangeUtc();
 
     // Aggregate today's spend per account from proxy logs
-    const todayLogs = db.select().from(schema.proxyLogs)
+    const todaySpendRows = db.select({
+      accountId: schema.proxyLogs.accountId,
+      totalSpend: sql<number>`coalesce(sum(${schema.proxyLogs.estimatedCost}), 0)`,
+    }).from(schema.proxyLogs)
       .where(and(gte(schema.proxyLogs.createdAt, startUtc), lt(schema.proxyLogs.createdAt, endUtc)))
+      .groupBy(schema.proxyLogs.accountId)
       .all();
     const spendByAccount: Record<number, number> = {};
-    for (const log of todayLogs) {
-      if (log.accountId == null) continue;
-      const cost = typeof log.estimatedCost === 'number' ? log.estimatedCost : 0;
-      spendByAccount[log.accountId] = (spendByAccount[log.accountId] || 0) + cost;
+    for (const row of todaySpendRows) {
+      if (row.accountId == null) continue;
+      spendByAccount[row.accountId] = Number(row.totalSpend || 0);
     }
 
     // Aggregate today's checkin rewards per account
-    const todayCheckins = db.select().from(schema.checkinLogs)
+    const todayCheckins = db.select({
+      accountId: schema.checkinLogs.accountId,
+      reward: schema.checkinLogs.reward,
+      message: schema.checkinLogs.message,
+    }).from(schema.checkinLogs)
       .where(and(
         gte(schema.checkinLogs.createdAt, startUtc),
         lt(schema.checkinLogs.createdAt, endUtc),

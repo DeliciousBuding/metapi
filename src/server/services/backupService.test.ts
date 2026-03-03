@@ -1,0 +1,198 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
+
+type DbModule = typeof import('../db/index.js');
+type BackupServiceModule = typeof import('./backupService.js');
+
+describe('backupService', () => {
+  let db: DbModule['db'];
+  let schema: DbModule['schema'];
+  let backupService: BackupServiceModule;
+  let dataDir = '';
+
+  beforeAll(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'metapi-backup-service-'));
+    process.env.DATA_DIR = dataDir;
+
+    await import('../db/migrate.js');
+    const dbModule = await import('../db/index.js');
+    const serviceModule = await import('./backupService.js');
+
+    db = dbModule.db;
+    schema = dbModule.schema;
+    backupService = serviceModule;
+  });
+
+  beforeEach(() => {
+    db.delete(schema.routeChannels).run();
+    db.delete(schema.tokenRoutes).run();
+    db.delete(schema.tokenModelAvailability).run();
+    db.delete(schema.modelAvailability).run();
+    db.delete(schema.proxyLogs).run();
+    db.delete(schema.checkinLogs).run();
+    db.delete(schema.accountTokens).run();
+    db.delete(schema.accounts).run();
+    db.delete(schema.sites).run();
+    db.delete(schema.settings).run();
+  });
+
+  afterAll(() => {
+    delete process.env.DATA_DIR;
+  });
+
+  it('preserves extended fields in full backup import/export roundtrip', () => {
+    const now = new Date().toISOString();
+    const site = db.insert(schema.sites).values({
+      name: 'roundtrip-site',
+      url: 'https://roundtrip.example.com',
+      platform: 'new-api',
+      proxyUrl: 'http://127.0.0.1:8080',
+      status: 'active',
+      isPinned: true,
+      sortOrder: 9,
+      apiKey: 'site-api-key',
+      createdAt: now,
+      updatedAt: now,
+    }).returning().get();
+
+    const account = db.insert(schema.accounts).values({
+      siteId: site.id,
+      username: 'roundtrip-user',
+      accessToken: 'session-token',
+      apiToken: 'api-token',
+      balance: 12.3,
+      balanceUsed: 4.5,
+      quota: 99.9,
+      unitCost: 0.2,
+      valueScore: 1.1,
+      status: 'active',
+      isPinned: true,
+      sortOrder: 7,
+      checkinEnabled: true,
+      extraConfig: JSON.stringify({ platformUserId: 123 }),
+      createdAt: now,
+      updatedAt: now,
+    }).returning().get();
+
+    const accountToken = db.insert(schema.accountTokens).values({
+      accountId: account.id,
+      name: 'default',
+      token: 'sk-roundtrip-token',
+      source: 'manual',
+      enabled: true,
+      isDefault: true,
+      createdAt: now,
+      updatedAt: now,
+    }).returning().get();
+
+    const route = db.insert(schema.tokenRoutes).values({
+      modelPattern: 'gpt-*',
+      displayName: 'gpt-route',
+      displayIcon: 'icon-gpt',
+      modelMapping: JSON.stringify({ to: 'gpt-4o-mini' }),
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    }).returning().get();
+
+    db.insert(schema.routeChannels).values({
+      routeId: route.id,
+      accountId: account.id,
+      tokenId: accountToken.id,
+      sourceModel: 'gpt-4o',
+      priority: 3,
+      weight: 5,
+      enabled: true,
+      manualOverride: false,
+      successCount: 10,
+      failCount: 1,
+      totalLatencyMs: 2500,
+      totalCost: 2.5,
+      lastUsedAt: now,
+      lastFailAt: now,
+      cooldownUntil: now,
+    }).run();
+
+    const exported = backupService.exportBackup('all');
+    const result = backupService.importBackup(exported as unknown as Record<string, unknown>);
+
+    expect(result.allImported).toBe(true);
+    expect(result.sections.accounts).toBe(true);
+
+    const restoredSite = db.select().from(schema.sites).where(eq(schema.sites.id, site.id)).get();
+    const restoredAccount = db.select().from(schema.accounts).where(eq(schema.accounts.id, account.id)).get();
+    const restoredRoute = db.select().from(schema.tokenRoutes).where(eq(schema.tokenRoutes.id, route.id)).get();
+    const restoredChannel = db.select().from(schema.routeChannels).where(eq(schema.routeChannels.routeId, route.id)).get();
+
+    expect(restoredSite?.proxyUrl).toBe('http://127.0.0.1:8080');
+    expect(restoredSite?.isPinned).toBe(true);
+    expect(restoredSite?.sortOrder).toBe(9);
+
+    expect(restoredAccount?.isPinned).toBe(true);
+    expect(restoredAccount?.sortOrder).toBe(7);
+
+    expect(restoredRoute?.displayName).toBe('gpt-route');
+    expect(restoredRoute?.displayIcon).toBe('icon-gpt');
+
+    expect(restoredChannel?.sourceModel).toBe('gpt-4o');
+  });
+
+  it('imports ALL-API-Hub style payload with accounts and preferences', () => {
+    const payload = {
+      timestamp: Date.now(),
+      accounts: {
+        accounts: [
+          {
+            site_url: 'https://legacy.example.com',
+            site_type: 'new-api',
+            site_name: 'legacy-site',
+            username: 'legacy-user',
+            authType: 'session',
+            account_info: {
+              id: 7788,
+              username: 'legacy-user',
+              access_token: 'legacy-session-token',
+              quota: 100000,
+              today_quota_consumption: 50000,
+            },
+            checkIn: {
+              autoCheckInEnabled: true,
+            },
+            created_at: '2026-02-01T00:00:00.000Z',
+            updated_at: '2026-02-02T00:00:00.000Z',
+          },
+        ],
+      },
+      preferences: {
+        locale: 'zh-CN',
+      },
+      channelConfigs: {
+        order: ['a', 'b'],
+      },
+      apiCredentialProfiles: {
+        default: 'main',
+      },
+      tagStore: {
+        groups: ['test'],
+      },
+    } as Record<string, unknown>;
+
+    const result = backupService.importBackup(payload);
+    expect(result.allImported).toBe(true);
+    expect(result.sections.accounts).toBe(true);
+    expect(result.sections.preferences).toBe(true);
+    expect(result.appliedSettings.length).toBeGreaterThan(0);
+
+    const sites = db.select().from(schema.sites).all();
+    const accounts = db.select().from(schema.accounts).all();
+    const settings = db.select().from(schema.settings).all();
+
+    expect(sites.length).toBe(1);
+    expect(accounts.length).toBe(1);
+    expect(accounts[0].username).toBe('legacy-user');
+    expect(settings.some((row) => row.key === 'legacy_preferences_ref_v2')).toBe(true);
+  });
+});

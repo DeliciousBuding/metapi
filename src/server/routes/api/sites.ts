@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '../../db/index.js';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { detectSite } from '../../services/siteDetector.js';
 import { invalidateSiteProxyCache, parseSiteProxyUrlInput } from '../../services/siteProxy.js';
 
@@ -35,11 +35,16 @@ export async function sitesRoutes(app: FastifyInstance) {
   // List all sites
   app.get('/api/sites', async () => {
     const siteRows = db.select().from(schema.sites).all();
-    const accountRows = db.select().from(schema.accounts).all();
+    const accountBalanceRows = db.select({
+      siteId: schema.accounts.siteId,
+      totalBalance: sql<number>`coalesce(sum(${schema.accounts.balance}), 0)`,
+    }).from(schema.accounts)
+      .groupBy(schema.accounts.siteId)
+      .all();
 
     const totalBalanceBySiteId: Record<number, number> = {};
-    for (const account of accountRows) {
-      totalBalanceBySiteId[account.siteId] = (totalBalanceBySiteId[account.siteId] || 0) + (account.balance || 0);
+    for (const row of accountBalanceRows) {
+      totalBalanceBySiteId[row.siteId] = Number(row.totalBalance || 0);
     }
 
     return siteRows.map((site) => ({

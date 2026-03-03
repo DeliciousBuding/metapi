@@ -167,4 +167,28 @@ describe('downstreamApiKeyService', () => {
     expect(service.isModelAllowedByPolicyOrAllowedRoutes('claude-opus-4-5', policy)).toBe(true);
     expect(service.isModelAllowedByPolicyOrAllowedRoutes('gpt-4o-mini', policy)).toBe(false);
   });
+
+  it('accumulates managed key request/cost usage and applies limits', () => {
+    const row = db.insert(schema.downstreamApiKeys).values({
+      name: 'metered-key',
+      key: 'sk-metered-key',
+      enabled: true,
+      maxRequests: 2,
+      maxCost: 1,
+      usedRequests: 0,
+      usedCost: 0,
+    }).returning().get();
+
+    service.consumeManagedKeyRequest(row.id);
+    service.consumeManagedKeyRequest(row.id);
+    service.recordManagedKeyCostUsage(row.id, 0.4);
+    service.recordManagedKeyCostUsage(row.id, 0.6);
+
+    const latest = service.getDownstreamApiKeyById(row.id);
+    expect(latest?.usedRequests).toBe(2);
+    expect(latest?.usedCost).toBeCloseTo(1);
+
+    const authResult = service.authorizeDownstreamToken(row.key);
+    expect(authResult.ok).toBe(false);
+  });
 });

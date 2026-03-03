@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { minimatch } from 'minimatch';
 import { db, schema } from '../db/index.js';
 import { config } from '../config.js';
@@ -360,31 +360,24 @@ export function authorizeDownstreamToken(token: string): DownstreamTokenAuthResu
 }
 
 export function consumeManagedKeyRequest(keyId: number): void {
-  const row = db.select().from(schema.downstreamApiKeys)
-    .where(eq(schema.downstreamApiKeys.id, keyId))
-    .get();
-  if (!row) return;
-
+  const nowIso = new Date().toISOString();
   db.update(schema.downstreamApiKeys).set({
-    usedRequests: Math.max(0, (row.usedRequests || 0) + 1),
-    lastUsedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    // Atomic increment to avoid lost updates under multi-process concurrency.
+    usedRequests: sql`coalesce(${schema.downstreamApiKeys.usedRequests}, 0) + 1`,
+    lastUsedAt: nowIso,
+    updatedAt: nowIso,
   }).where(eq(schema.downstreamApiKeys.id, keyId)).run();
 }
 
 export function recordManagedKeyCostUsage(keyId: number, estimatedCost: number): void {
   const cost = Number(estimatedCost);
   if (!Number.isFinite(cost) || cost <= 0) return;
-
-  const row = db.select().from(schema.downstreamApiKeys)
-    .where(eq(schema.downstreamApiKeys.id, keyId))
-    .get();
-  if (!row) return;
-
+  const nowIso = new Date().toISOString();
   db.update(schema.downstreamApiKeys).set({
-    usedCost: Math.max(0, (row.usedCost || 0) + cost),
-    lastUsedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    // Atomic increment to avoid lost updates under multi-process concurrency.
+    usedCost: sql`coalesce(${schema.downstreamApiKeys.usedCost}, 0) + ${cost}`,
+    lastUsedAt: nowIso,
+    updatedAt: nowIso,
   }).where(eq(schema.downstreamApiKeys.id, keyId)).run();
 }
 

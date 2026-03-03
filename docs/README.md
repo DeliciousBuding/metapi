@@ -35,18 +35,11 @@ npm run docs:build
 | 🧩 [FAQ/教程贡献规范](./community/faq-tutorial-guidelines.md) | 社区贡献者 | 统一沉淀 FAQ、教程与排障经验 |
 | 📁 [目录规范](./project-structure.md) | 开发者 | 项目目录组织与约定 |
 
-## 架构概览
+## 🏛️ 架构概览
 
-**下游客户端**（Cursor · Claude Code · Codex · Open WebUI · Cherry Studio 等）
-&emsp;↓ &ensp;`Authorization: Bearer <PROXY_TOKEN>`
-**Metapi 网关**
-&emsp;• 统一代理 `/v1/*` — 兼容 OpenAI / Claude 全接口
-&emsp;• 智能路由引擎 — 按成本、余额、可用率加权选路，失败自动冷却与重试
-&emsp;• 模型发现 — 自动聚合上游全部模型，零配置
-&emsp;• 格式转换 — OpenAI ⇄ Claude 双向透明转换
-&emsp;• 自动签到 · 余额管理 · 告警通知 · 数据看板
-&emsp;↓
-**上游平台**（New API · One API · OneHub · DoneHub · Veloera · AnyRouter · Sub2API …）
+<div align="center">
+  <img src="./screenshots/metapi-architecture.png" alt="Metapi: Federated AI Model Aggregation Gateway Architecture" style="max-width: 100%; height: auto;" />
+</div>
 
 ## 核心概念
 
