@@ -285,7 +285,8 @@ async function handleChatProxyRequest(
           return null;
         },
         shouldDowngrade: (ctx) => (
-          isEndpointDowngradeError(ctx.response.status, ctx.rawErrText)
+          ctx.response.status >= 500
+          || isEndpointDowngradeError(ctx.response.status, ctx.rawErrText)
           || isMessagesRequiredError(ctx.rawErrText)
         ),
         onDowngrade: (ctx) => {

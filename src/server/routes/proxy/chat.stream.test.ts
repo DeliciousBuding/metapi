@@ -1845,6 +1845,67 @@ describe('chat proxy stream behavior', () => {
     expect(secondUrl).toContain('/v1/chat/completions');
   });
 
+  it('falls back to /v1/responses for /v1/chat/completions when messages/chat endpoints return 502', async () => {
+    selectChannelMock.mockReturnValue({
+      channel: { id: 11, routeId: 22 },
+      site: { name: 'generic-site', url: 'https://generic.example.com', platform: 'new-api' },
+      account: { id: 33, username: 'demo-user' },
+      tokenName: 'default',
+      tokenValue: 'sk-generic',
+      actualModel: 'claude-haiku-4-5-20251001',
+    });
+
+    fetchMock
+      .mockResolvedValueOnce(new Response(
+        '<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>Cloudflare</body></html>',
+        {
+          status: 502,
+          headers: { 'content-type': 'text/html; charset=UTF-8' },
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        '<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>Cloudflare</body></html>',
+        {
+          status: 502,
+          headers: { 'content-type': 'text/html; charset=UTF-8' },
+        },
+      ))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'resp_anyrouter_fallback',
+        object: 'response',
+        model: 'claude-haiku-4-5-20251001',
+        status: 'completed',
+        output_text: 'ok via responses fallback after 502',
+        usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'claude-haiku-4-5-20251001',
+        stream: false,
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    const [firstUrl] = fetchMock.mock.calls[0] as [string, any];
+    const [secondUrl] = fetchMock.mock.calls[1] as [string, any];
+    const [thirdUrl] = fetchMock.mock.calls[2] as [string, any];
+    expect(firstUrl).toContain('/v1/messages');
+    expect(secondUrl).toContain('/v1/chat/completions');
+    expect(thirdUrl).toContain('/v1/responses');
+
+    const body = response.json();
+    expect(body?.choices?.[0]?.message?.content).toContain('ok via responses fallback after 502');
+  });
+
   it('forces openai platform to use /v1/chat/completions for claude downstream requests', async () => {
     selectChannelMock.mockReturnValue({
       channel: { id: 11, routeId: 22 },
