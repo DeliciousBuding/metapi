@@ -3,6 +3,7 @@ import { db, schema } from '../../db/index.js';
 import { and, eq } from 'drizzle-orm';
 import { refreshModelsAndRebuildRoutes } from '../../services/modelService.js';
 import { getDownstreamRoutingPolicy } from './downstreamPolicy.js';
+import { tokenRouter } from '../../services/tokenRouter.js';
 import { isModelAllowedByPolicyOrAllowedRoutes } from '../../services/downstreamApiKeyService.js';
 
 export async function modelsProxyRoute(app: FastifyInstance) {
@@ -34,7 +35,11 @@ export async function modelsProxyRoute(app: FastifyInstance) {
       ])).sort();
       const allowed: string[] = [];
       for (const modelName of deduped) {
-        if (await isModelAllowedByPolicyOrAllowedRoutes(modelName, downstreamPolicy)) {
+        if (!await isModelAllowedByPolicyOrAllowedRoutes(modelName, downstreamPolicy)) {
+          continue;
+        }
+        const decision = await tokenRouter.explainSelection(modelName, [], downstreamPolicy);
+        if (typeof decision.selectedChannelId === 'number') {
           allowed.push(modelName);
         }
       }
