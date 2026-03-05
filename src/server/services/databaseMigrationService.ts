@@ -130,14 +130,25 @@ function assertDialectUrl(dialect: MigrationDialect, connectionString: string): 
 
 function normalizeSqliteTarget(raw: string): string {
   if (!raw) throw new Error('SQLite 目标路径不能为空');
-  if (raw.startsWith('file://')) {
-    const parsed = new URL(raw);
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error('SQLite 目标路径不能为空');
+  if (trimmed === ':memory:') return trimmed;
+
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith('file://')) {
+    const parsed = new URL(trimmed);
     return decodeURIComponent(parsed.pathname);
   }
-  if (raw.startsWith('sqlite://')) {
-    return raw.slice('sqlite://'.length).trim();
+  if (lower.startsWith('sqlite://')) {
+    return trimmed.slice('sqlite://'.length).trim();
   }
-  return raw;
+
+  // Guard against accidentally saving a network URL under sqlite dialect.
+  // This would be treated as a local sqlite file path and produce a broken runtime DB.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    throw new Error('SQLite 连接串不能是网络 URL，请先选择 MySQL 或 PostgreSQL');
+  }
+  return trimmed;
 }
 
 export function normalizeMigrationInput(input: DatabaseMigrationInput): NormalizedDatabaseMigrationInput {

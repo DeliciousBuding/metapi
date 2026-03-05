@@ -106,4 +106,20 @@ describe('settings database runtime config api', () => {
     expect(body.success).toBe(false);
     expect(body.message || '').toContain('postgres');
   });
+
+  it('rejects sqlite dialect with network url connection string', async () => {
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/database/runtime',
+      payload: {
+        dialect: 'sqlite',
+        connectionString: 'postgres://metapi:secret@127.0.0.1:5432/postgres',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = response.json() as { success?: boolean; message?: string };
+    expect(body.success).toBe(false);
+    expect(body.message || '').toContain('SQLite');
+  });
 });
