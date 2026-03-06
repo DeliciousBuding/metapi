@@ -14,6 +14,7 @@ import {
   testDatabaseConnection,
   type MigrationDialect,
 } from '../../services/databaseMigrationService.js';
+import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 import { extractClientIp, isIpAllowed } from '../../middleware/auth.js';
 
 type RoutingWeights = typeof config.routingWeights;
@@ -87,13 +88,14 @@ async function appendSettingsEvent(input: {
   level?: 'info' | 'warning' | 'error';
 }) {
   try {
+    const createdAt = formatUtcSqlDateTime(new Date());
     await db.insert(schema.events).values({
       type: input.type,
       title: input.title,
       message: input.message,
       level: input.level || 'info',
       relatedType: 'settings',
-      createdAt: new Date().toISOString(),
+      createdAt,
     }).run();
   } catch {}
 }

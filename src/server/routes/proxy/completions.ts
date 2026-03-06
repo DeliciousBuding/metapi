@@ -12,6 +12,7 @@ import { mergeProxyUsage, parseProxyUsage, pullSseDataEvents } from '../../servi
 import { ensureModelAllowedForDownstreamKey, getDownstreamRoutingPolicy, recordDownstreamCostUsage } from './downstreamPolicy.js';
 import { withExplicitProxyRequestInit } from '../../services/siteProxy.js';
 import { composeProxyLogMessage } from './logPathMeta.js';
+import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 
 const MAX_RETRIES = 2;
 
@@ -242,6 +243,7 @@ async function logProxy(
   estimatedCost = 0,
 ) {
   try {
+    const createdAt = formatUtcSqlDateTime(new Date());
     const normalizedErrorMessage = composeProxyLogMessage({
       downstreamPath: '/v1/completions',
       errorMessage,
@@ -261,7 +263,7 @@ async function logProxy(
       estimatedCost,
       errorMessage: normalizedErrorMessage,
       retryCount,
-      createdAt: new Date().toISOString(),
+      createdAt,
     }).run();
   } catch (error) {
     console.warn('[proxy/completions] failed to write proxy log', error);

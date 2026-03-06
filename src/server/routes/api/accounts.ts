@@ -125,6 +125,8 @@ type LoginFailureInfo = {
   shieldBlocked: boolean;
 };
 
+const ACCOUNT_HEALTH_REFRESH_TIMEOUT_MS = 10_000;
+
 function normalizeLoginFailure(message: string | null | undefined): LoginFailureInfo {
   const raw = (message || '').trim();
   const lowered = raw.toLowerCase();
@@ -168,6 +170,20 @@ function summarizeAccountHealthRefresh(results: AccountHealthRefreshResult[]) {
   };
 }
 
+async function withTimeout<T>(fn: () => Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function refreshRuntimeHealthForRow(row: AccountWithSiteRow): Promise<AccountHealthRefreshResult> {
   const accountId = row.accounts.id;
   const username = row.accounts.username;
@@ -190,7 +206,11 @@ async function refreshRuntimeHealthForRow(row: AccountWithSiteRow): Promise<Acco
   }
 
   try {
-    await refreshBalance(accountId);
+    await withTimeout(
+      () => refreshBalance(accountId),
+      ACCOUNT_HEALTH_REFRESH_TIMEOUT_MS,
+      `站点健康检查超时（${Math.max(1, Math.round(ACCOUNT_HEALTH_REFRESH_TIMEOUT_MS / 1000))}s）`,
+    );
     const refreshedAccount = await db.select().from(schema.accounts)
       .where(eq(schema.accounts.id, accountId))
       .get();

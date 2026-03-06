@@ -1,6 +1,6 @@
 ﻿import { FastifyInstance } from 'fastify';
 import { db, schema } from '../../db/index.js';
-import { and, desc, gte, eq, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import {
   refreshModelsForAccount,
   refreshModelsAndRebuildRoutes,

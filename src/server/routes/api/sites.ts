@@ -3,6 +3,7 @@ import { db, schema } from '../../db/index.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { detectSite } from '../../services/siteDetector.js';
 import { invalidateSiteProxyCache, parseSiteProxyUrlInput } from '../../services/siteProxy.js';
+import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 
 function normalizeSiteStatus(input: unknown): 'active' | 'disabled' | null {
   if (input === undefined || input === null) return null;
@@ -237,6 +238,7 @@ export async function sitesRoutes(app: FastifyInstance) {
           .run();
 
         try {
+          const createdAt = formatUtcSqlDateTime(new Date());
           await db.insert(schema.events).values({
             type: 'status',
             title: '站点已禁用',
@@ -244,7 +246,7 @@ export async function sitesRoutes(app: FastifyInstance) {
             level: 'warning',
             relatedId: id,
             relatedType: 'site',
-            createdAt: new Date().toISOString(),
+            createdAt,
           }).run();
         } catch {}
       } else {
@@ -254,6 +256,7 @@ export async function sitesRoutes(app: FastifyInstance) {
           .run();
 
         try {
+          const createdAt = formatUtcSqlDateTime(new Date());
           await db.insert(schema.events).values({
             type: 'status',
             title: '站点已启用',
@@ -261,7 +264,7 @@ export async function sitesRoutes(app: FastifyInstance) {
             level: 'info',
             relatedId: id,
             relatedType: 'site',
-            createdAt: new Date().toISOString(),
+            createdAt,
           }).run();
         } catch {}
       }

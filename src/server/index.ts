@@ -21,9 +21,9 @@ import { proxyRoutes } from './routes/proxy/router.js';
 import { startScheduler } from './services/checkinScheduler.js';
 import { startProxyLogRetentionService, stopProxyLogRetentionService } from './services/proxyLogRetentionService.js';
 import { buildStartupSummaryLines } from './services/startupInfo.js';
+import { repairStoredCreatedAtValues } from './services/storedTimestampRepairService.js';
 import { existsSync } from 'fs';
 import { normalize, resolve, sep } from 'path';
-import { eq, isNull, or } from 'drizzle-orm';
 import { db, runtimeDbDialect, schema, switchRuntimeDatabase, type RuntimeDbDialect } from './db/index.js';
 
 function toSettingsMap(rows: Array<{ key: string; value: string }>) {
@@ -183,20 +183,7 @@ try {
   const finalRows = await db.select().from(schema.settings).all();
   const finalMap = toSettingsMap(finalRows);
   applyRuntimeSettings(finalMap);
-
-  const repairedAt = new Date().toISOString();
-  await db.update(schema.events)
-    .set({ createdAt: repairedAt })
-    .where(or(isNull(schema.events.createdAt), eq(schema.events.createdAt, '')))
-    .run();
-  await db.update(schema.proxyLogs)
-    .set({ createdAt: repairedAt })
-    .where(or(isNull(schema.proxyLogs.createdAt), eq(schema.proxyLogs.createdAt, '')))
-    .run();
-  await db.update(schema.checkinLogs)
-    .set({ createdAt: repairedAt })
-    .where(or(isNull(schema.checkinLogs.createdAt), eq(schema.checkinLogs.createdAt, '')))
-    .run();
+  await repairStoredCreatedAtValues();
 
   console.log('Loaded runtime settings overrides');
 } catch { /* first run, table may not exist */ }
