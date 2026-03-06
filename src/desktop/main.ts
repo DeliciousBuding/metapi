@@ -8,7 +8,7 @@ import {
   shell,
 } from 'electron';
 import log from 'electron-log';
-import { autoUpdater } from 'electron-updater';
+import electronUpdater from 'electron-updater';
 import getPort, { portNumbers } from 'get-port';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -20,6 +20,8 @@ import {
   isFatalServerExit,
   waitForServerReady,
 } from './runtime.js';
+
+const { autoUpdater } = electronUpdater;
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -48,7 +50,7 @@ function getServerEntryPath() {
 }
 
 function getTrayIconPath() {
-  return join(app.getAppPath(), 'dist', 'web', 'favicon.png');
+  return join(app.getAppPath(), 'dist', 'web', 'logo.png');
 }
 
 function getWindowIconPath() {

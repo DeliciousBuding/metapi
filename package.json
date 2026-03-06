@@ -100,5 +100,6 @@
   },
   "overrides": {
     "minimist": "^1.2.8"
-  }
+  },
+  "author": "cita-777"
 }
