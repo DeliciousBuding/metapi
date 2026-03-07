@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { db, schema } from '../../db/index.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { detectSite } from '../../services/siteDetector.js';
-import { invalidateSiteProxyCache, parseSiteProxyUrlInput } from '../../services/siteProxy.js';
+import { invalidateSiteProxyCache } from '../../services/siteProxy.js';
 import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 
 function normalizeSiteStatus(input: unknown): 'active' | 'disabled' | null {
@@ -23,6 +23,10 @@ function normalizePinnedFlag(input: unknown): boolean | null {
     if (normalized === 'false' || normalized === '0') return false;
   }
   return null;
+}
+
+function normalizeUseSystemProxyFlag(input: unknown): boolean | null {
+  return normalizePinnedFlag(input);
 }
 
 function normalizeSortOrder(input: unknown): number | null {
@@ -70,6 +74,59 @@ function normalizeOptionalExternalCheckinUrl(input: unknown): {
 }
 
 export async function sitesRoutes(app: FastifyInstance) {
+  async function applySiteStatusSideEffects(
+    siteId: number,
+    existingSiteName: string,
+    normalizedStatus: 'active' | 'disabled',
+  ) {
+    const now = new Date().toISOString();
+    if (normalizedStatus === 'disabled') {
+      await db.update(schema.accounts)
+        .set({ status: 'disabled', updatedAt: now })
+        .where(eq(schema.accounts.siteId, siteId))
+        .run();
+
+      try {
+        const createdAt = formatUtcSqlDateTime(new Date());
+        await db.insert(schema.events).values({
+          type: 'status',
+          title: '站点已禁用',
+          message: `${existingSiteName} 已禁用，关联账号已全部置为禁用`,
+          level: 'warning',
+          relatedId: siteId,
+          relatedType: 'site',
+          createdAt,
+        }).run();
+      } catch {}
+      return;
+    }
+
+    await db.update(schema.accounts)
+      .set({ status: 'active', updatedAt: now })
+      .where(and(eq(schema.accounts.siteId, siteId), eq(schema.accounts.status, 'disabled')))
+      .run();
+
+    try {
+      const createdAt = formatUtcSqlDateTime(new Date());
+      await db.insert(schema.events).values({
+        type: 'status',
+        title: '站点已启用',
+        message: `${existingSiteName} 已启用，关联禁用账号已恢复为活跃`,
+        level: 'info',
+        relatedId: siteId,
+        relatedType: 'site',
+        createdAt,
+      }).run();
+    } catch {}
+  }
+
+  function normalizeBatchIds(input: unknown): number[] {
+    if (!Array.isArray(input)) return [];
+    return input
+      .map((item) => Number.parseInt(String(item), 10))
+      .filter((id) => Number.isFinite(id) && id > 0);
+  }
+
   // List all sites
   app.get('/api/sites', async () => {
     const siteRows = await db.select().from(schema.sites).all();
@@ -96,21 +153,21 @@ export async function sitesRoutes(app: FastifyInstance) {
     name: string;
     url: string;
     platform?: string;
-    proxyUrl?: string | null;
+    useSystemProxy?: boolean;
     externalCheckinUrl?: string | null;
     status?: string;
     isPinned?: boolean;
     sortOrder?: number;
     globalWeight?: number;
   } }>('/api/sites', async (request, reply) => {
-    const { name, url, platform, proxyUrl, externalCheckinUrl, status, isPinned, sortOrder, globalWeight } = request.body;
+    const { name, url, platform, useSystemProxy, externalCheckinUrl, status, isPinned, sortOrder, globalWeight } = request.body;
     const normalizedStatus = normalizeSiteStatus(status);
     if (status !== undefined && !normalizedStatus) {
       return reply.code(400).send({ error: 'Invalid site status. Expected active or disabled.' });
     }
-    const parsedProxyUrl = parseSiteProxyUrlInput(proxyUrl);
-    if (!parsedProxyUrl.valid) {
-      return reply.code(400).send({ error: 'Invalid proxyUrl. Expected a valid http(s)/socks proxy URL.' });
+    const normalizedUseSystemProxy = normalizeUseSystemProxyFlag(useSystemProxy);
+    if (useSystemProxy !== undefined && normalizedUseSystemProxy === null) {
+      return reply.code(400).send({ error: 'Invalid useSystemProxy value. Expected boolean.' });
     }
     const normalizedExternalCheckinUrl = normalizeOptionalExternalCheckinUrl(externalCheckinUrl);
     if (!normalizedExternalCheckinUrl.valid) {
@@ -144,7 +201,7 @@ export async function sitesRoutes(app: FastifyInstance) {
       name,
       url: url.replace(/\/+$/, ''),
       platform: detectedPlatform,
-      proxyUrl: parsedProxyUrl.proxyUrl,
+      useSystemProxy: normalizedUseSystemProxy ?? false,
       externalCheckinUrl: normalizedExternalCheckinUrl.url,
       status: normalizedStatus ?? 'active',
       isPinned: normalizedPinned ?? false,
@@ -168,7 +225,7 @@ export async function sitesRoutes(app: FastifyInstance) {
     name?: string;
     url?: string;
     platform?: string;
-    proxyUrl?: string | null;
+    useSystemProxy?: boolean;
     externalCheckinUrl?: string | null;
     status?: string;
     isPinned?: boolean;
@@ -191,9 +248,9 @@ export async function sitesRoutes(app: FastifyInstance) {
     if (body.status !== undefined && !normalizedStatus) {
       return reply.code(400).send({ error: 'Invalid site status. Expected active or disabled.' });
     }
-    const parsedProxyUrl = parseSiteProxyUrlInput(body.proxyUrl);
-    if (!parsedProxyUrl.valid) {
-      return reply.code(400).send({ error: 'Invalid proxyUrl. Expected a valid http(s)/socks proxy URL.' });
+    const normalizedUseSystemProxy = normalizeUseSystemProxyFlag(body.useSystemProxy);
+    if (body.useSystemProxy !== undefined && normalizedUseSystemProxy === null) {
+      return reply.code(400).send({ error: 'Invalid useSystemProxy value. Expected boolean.' });
     }
     const normalizedExternalCheckinUrl = normalizeOptionalExternalCheckinUrl(body.externalCheckinUrl);
     if (!normalizedExternalCheckinUrl.valid) {
@@ -215,7 +272,7 @@ export async function sitesRoutes(app: FastifyInstance) {
     if (body.name !== undefined) updates.name = body.name;
     if (body.url !== undefined) updates.url = body.url.replace(/\/+$/, '');
     if (body.platform !== undefined) updates.platform = body.platform;
-    if (parsedProxyUrl.present) updates.proxyUrl = parsedProxyUrl.proxyUrl;
+    if (body.useSystemProxy !== undefined) updates.useSystemProxy = normalizedUseSystemProxy;
     if (normalizedExternalCheckinUrl.present) updates.externalCheckinUrl = normalizedExternalCheckinUrl.url;
     if (body.status !== undefined) updates.status = normalizedStatus;
     if (body.isPinned !== undefined) updates.isPinned = normalizedPinned;
@@ -226,44 +283,7 @@ export async function sitesRoutes(app: FastifyInstance) {
     invalidateSiteProxyCache();
 
     if (body.status !== undefined && normalizedStatus) {
-      const now = new Date().toISOString();
-      if (normalizedStatus === 'disabled') {
-        await db.update(schema.accounts)
-          .set({ status: 'disabled', updatedAt: now })
-          .where(eq(schema.accounts.siteId, id))
-          .run();
-
-        try {
-          const createdAt = formatUtcSqlDateTime(new Date());
-          await db.insert(schema.events).values({
-            type: 'status',
-            title: '站点已禁用',
-            message: `${existingSite.name} 已禁用，关联账号已全部置为禁用`,
-            level: 'warning',
-            relatedId: id,
-            relatedType: 'site',
-            createdAt,
-          }).run();
-        } catch {}
-      } else {
-        await db.update(schema.accounts)
-          .set({ status: 'active', updatedAt: now })
-          .where(and(eq(schema.accounts.siteId, id), eq(schema.accounts.status, 'disabled')))
-          .run();
-
-        try {
-          const createdAt = formatUtcSqlDateTime(new Date());
-          await db.insert(schema.events).values({
-            type: 'status',
-            title: '站点已启用',
-            message: `${existingSite.name} 已启用，关联禁用账号已恢复为活跃`,
-            level: 'info',
-            relatedId: id,
-            relatedType: 'site',
-            createdAt,
-          }).run();
-        } catch {}
-      }
+      await applySiteStatusSideEffects(id, existingSite.name, normalizedStatus);
     }
 
     return await db.select().from(schema.sites).where(eq(schema.sites.id, id)).get();
@@ -275,6 +295,61 @@ export async function sitesRoutes(app: FastifyInstance) {
     await db.delete(schema.sites).where(eq(schema.sites.id, id)).run();
     invalidateSiteProxyCache();
     return { success: true };
+  });
+
+  app.post<{ Body?: { ids?: number[]; action?: string } }>('/api/sites/batch', async (request, reply) => {
+    const ids = normalizeBatchIds(request.body?.ids);
+    const action = String(request.body?.action || '').trim();
+    if (ids.length === 0) {
+      return reply.code(400).send({ message: 'ids is required' });
+    }
+    if (!['enable', 'disable', 'delete', 'enableSystemProxy', 'disableSystemProxy'].includes(action)) {
+      return reply.code(400).send({ message: 'Invalid action' });
+    }
+
+    const successIds: number[] = [];
+    const failedItems: Array<{ id: number; message: string }> = [];
+
+    for (const id of ids) {
+      const existingSite = await db.select().from(schema.sites).where(eq(schema.sites.id, id)).get();
+      if (!existingSite) {
+        failedItems.push({ id, message: 'Site not found' });
+        continue;
+      }
+
+      try {
+        if (action === 'delete') {
+          await db.delete(schema.sites).where(eq(schema.sites.id, id)).run();
+        } else if (action === 'enableSystemProxy') {
+          await db.update(schema.sites)
+            .set({ useSystemProxy: true, updatedAt: new Date().toISOString() })
+            .where(eq(schema.sites.id, id))
+            .run();
+        } else if (action === 'disableSystemProxy') {
+          await db.update(schema.sites)
+            .set({ useSystemProxy: false, updatedAt: new Date().toISOString() })
+            .where(eq(schema.sites.id, id))
+            .run();
+        } else {
+          const nextStatus = action === 'enable' ? 'active' : 'disabled';
+          await db.update(schema.sites)
+            .set({ status: nextStatus, updatedAt: new Date().toISOString() })
+            .where(eq(schema.sites.id, id))
+            .run();
+          await applySiteStatusSideEffects(id, existingSite.name, nextStatus);
+        }
+        successIds.push(id);
+      } catch (error: any) {
+        failedItems.push({ id, message: error?.message || 'Batch operation failed' });
+      }
+    }
+
+    invalidateSiteProxyCache();
+    return {
+      success: true,
+      successIds,
+      failedItems,
+    };
   });
 
   // Detect platform for a URL

@@ -8,6 +8,7 @@ export const sites = sqliteTable('sites', {
   externalCheckinUrl: text('external_checkin_url'),
   platform: text('platform').notNull(), // 'new-api' | 'one-api' | 'veloera' | 'one-hub' | 'done-hub' | 'sub2api' | 'openai' | 'claude' | 'gemini'
   proxyUrl: text('proxy_url'),
+  useSystemProxy: integer('use_system_proxy', { mode: 'boolean' }).default(false),
   status: text('status').notNull().default('active'), // 'active' | 'disabled'
   isPinned: integer('is_pinned', { mode: 'boolean' }).default(false),
   sortOrder: integer('sort_order').default(0),

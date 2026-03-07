@@ -175,6 +175,23 @@ function ensureSiteProxySchema() {
   }
 }
 
+function ensureSiteUseSystemProxySchema() {
+  const sqlite = requireSqliteConnection();
+  if (!tableExists('sites')) {
+    return;
+  }
+
+  if (!tableColumnExists('sites', 'use_system_proxy')) {
+    sqlite.exec(`ALTER TABLE sites ADD COLUMN use_system_proxy integer DEFAULT 0;`);
+  }
+
+  sqlite.exec(`
+    UPDATE sites
+    SET use_system_proxy = 0
+    WHERE use_system_proxy IS NULL;
+  `);
+}
+
 function ensureSiteExternalCheckinUrlSchema() {
   const sqlite = requireSqliteConnection();
   if (!tableExists('sites')) {
@@ -604,6 +621,7 @@ function initSqliteDb() {
   ensureTokenManagementSchema();
   ensureSiteStatusSchema();
   ensureSiteProxySchema();
+  ensureSiteUseSystemProxySchema();
   ensureSiteExternalCheckinUrlSchema();
   ensureSiteGlobalWeightSchema();
   ensureRouteGroupingSchema();

@@ -8,7 +8,7 @@ import { isTokenExpiredError } from '../../services/alertRules.js';
 import { shouldRetryProxyRequest } from '../../services/proxyRetryPolicy.js';
 import { resolveProxyUsageWithSelfLogFallback } from '../../services/proxyUsageFallbackService.js';
 import { mergeProxyUsage, parseProxyUsage } from '../../services/proxyUsageParser.js';
-import { withExplicitProxyRequestInit } from '../../services/siteProxy.js';
+import { resolveProxyUrlForSite, withSiteRecordProxyRequestInit } from '../../services/siteProxy.js';
 import {
   type DownstreamFormat,
   createStreamTransformContext,
@@ -183,7 +183,7 @@ async function handleChatProxyRequest(
     try {
       const endpointResult = await executeEndpointFlow({
         siteUrl: selected.site.url,
-        proxyUrl: selected.site.proxyUrl,
+        proxyUrl: resolveProxyUrlForSite(selected.site),
         endpointCandidates,
         buildRequest: (endpoint) => {
           const endpointRequest = buildUpstreamEndpointRequest({
@@ -225,7 +225,7 @@ async function handleChatProxyRequest(
               downstreamHeaders: request.headers as Record<string, unknown>,
             });
             const normalizedTargetUrl = `${selected.site.url}${normalizedClaudeRequest.path}`;
-            const normalizedResponse = await fetch(normalizedTargetUrl, withExplicitProxyRequestInit(selected.site.proxyUrl, {
+            const normalizedResponse = await fetch(normalizedTargetUrl, withSiteRecordProxyRequestInit(selected.site, {
               method: 'POST',
               headers: normalizedClaudeRequest.headers,
               body: JSON.stringify(normalizedClaudeRequest.body),
@@ -264,7 +264,7 @@ async function handleChatProxyRequest(
             return null;
           }
 
-          const minimalResponse = await fetch(ctx.targetUrl, withExplicitProxyRequestInit(selected.site.proxyUrl, {
+          const minimalResponse = await fetch(ctx.targetUrl, withSiteRecordProxyRequestInit(selected.site, {
             method: 'POST',
             headers: minimalHeaders,
             body: JSON.stringify(ctx.request.body),

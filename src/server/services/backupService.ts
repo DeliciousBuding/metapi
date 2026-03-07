@@ -162,6 +162,7 @@ function buildAccountsSectionFromRefBackup(data: RawBackupData): AccountsBackupS
         externalCheckinUrl: null,
         platform,
         proxyUrl: null,
+        useSystemProxy: false,
         status: 'active',
         isPinned: false,
         sortOrder: sites.length,

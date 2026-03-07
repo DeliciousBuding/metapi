@@ -136,6 +136,13 @@ function parseExpiredTime(value: unknown): number | undefined {
   return seconds > 0 ? seconds : undefined;
 }
 
+function normalizeBatchIds(input: unknown): number[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => Number.parseInt(String(item), 10))
+    .filter((id) => Number.isFinite(id) && id > 0);
+}
+
 async function withTimeout<T>(fn: () => Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
@@ -494,6 +501,111 @@ export async function accountTokensRoutes(app: FastifyInstance) {
     };
   });
 
+  const deleteAccountTokenById = async (tokenId: number): Promise<{ success: boolean; message?: string }> => {
+    const row = await db.select()
+      .from(schema.accountTokens)
+      .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
+      .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
+      .where(eq(schema.accountTokens.id, tokenId))
+      .get();
+    if (!row) {
+      return { success: false, message: '令牌不存在' };
+    }
+
+    if (isApiKeyConnection(row.accounts)) {
+      return { success: false, message: 'API Key 连接不支持管理账号令牌' };
+    }
+
+    const existing = row.account_tokens;
+    const account = row.accounts;
+    const site = row.sites;
+    const adapter = getAdapter(site.platform);
+    const shouldDeleteUpstream = !isSiteDisabled(site.status) && !!account.accessToken?.trim() && !!adapter;
+
+    if (shouldDeleteUpstream) {
+      const platformUserId = resolvePlatformUserId(account.extraConfig, account.username);
+      const upstreamDeleted = await adapter!.deleteApiToken(
+        site.url,
+        account.accessToken,
+        existing.token,
+        platformUserId,
+      );
+      if (!upstreamDeleted) {
+        return { success: false, message: '站点删除令牌失败，本地未删除' };
+      }
+    }
+
+    await db.delete(schema.accountTokens).where(eq(schema.accountTokens.id, tokenId)).run();
+    if (existing.isDefault) {
+      repairDefaultToken(existing.accountId);
+    }
+
+    return { success: true };
+  };
+
+  app.post<{ Body?: { ids?: number[]; action?: string } }>('/api/account-tokens/batch', async (request, reply) => {
+    const ids = normalizeBatchIds(request.body?.ids);
+    const action = String(request.body?.action || '').trim();
+    if (ids.length === 0) {
+      return reply.code(400).send({ message: 'ids is required' });
+    }
+    if (!['enable', 'disable', 'delete'].includes(action)) {
+      return reply.code(400).send({ message: 'Invalid action' });
+    }
+
+    const successIds: number[] = [];
+    const failedItems: Array<{ id: number; message: string }> = [];
+
+    for (const id of ids) {
+      try {
+        const existing = await db.select().from(schema.accountTokens).where(eq(schema.accountTokens.id, id)).get();
+        if (!existing) {
+          failedItems.push({ id, message: 'Token not found' });
+          continue;
+        }
+
+        const owner = await db.select().from(schema.accounts).where(eq(schema.accounts.id, existing.accountId)).get();
+        if (!owner) {
+          failedItems.push({ id, message: 'Account not found' });
+          continue;
+        }
+        if (isApiKeyConnection(owner)) {
+          failedItems.push({ id, message: 'API Key 连接不支持管理账号令牌' });
+          continue;
+        }
+
+        if (action === 'delete') {
+          const result = await deleteAccountTokenById(id);
+          if (!result.success) {
+            failedItems.push({ id, message: result.message || 'Batch operation failed' });
+            continue;
+          }
+        } else {
+          await db.update(schema.accountTokens)
+            .set({
+              enabled: action === 'enable',
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.accountTokens.id, id))
+            .run();
+          if (existing.isDefault && action === 'disable') {
+            repairDefaultToken(existing.accountId);
+          }
+        }
+
+        successIds.push(id);
+      } catch (error: any) {
+        failedItems.push({ id, message: error?.message || 'Batch operation failed' });
+      }
+    }
+
+    return {
+      success: true,
+      successIds,
+      failedItems,
+    };
+  });
+
   app.put<{ Params: { id: string }; Body: { name?: string; token?: string; enabled?: boolean; isDefault?: boolean; source?: string } }>('/api/account-tokens/:id', async (request, reply) => {
     const tokenId = Number.parseInt(request.params.id, 10);
     if (Number.isNaN(tokenId)) {
@@ -652,46 +764,13 @@ export async function accountTokensRoutes(app: FastifyInstance) {
     if (Number.isNaN(tokenId)) {
       return reply.code(400).send({ success: false, message: '令牌 ID 无效' });
     }
-
-    const row = await db.select()
-      .from(schema.accountTokens)
-      .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
-      .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-      .where(eq(schema.accountTokens.id, tokenId))
-      .get();
-    if (!row) {
-      return reply.code(404).send({ success: false, message: '令牌不存在' });
+    const result = await deleteAccountTokenById(tokenId);
+    if (!result.success) {
+      const statusCode = result.message === '令牌不存在'
+        ? 404
+        : (result.message === 'API Key 连接不支持管理账号令牌' ? 400 : 502);
+      return reply.code(statusCode).send({ success: false, message: result.message });
     }
-
-    if (isApiKeyConnection(row.accounts)) {
-      return reply.code(400).send({ success: false, message: 'API Key 连接不支持管理账号令牌' });
-    }
-
-    const existing = row.account_tokens;
-    const account = row.accounts;
-    const site = row.sites;
-    const adapter = getAdapter(site.platform);
-    const shouldDeleteUpstream = !isSiteDisabled(site.status) && !!account.accessToken?.trim() && !!adapter;
-
-    if (shouldDeleteUpstream) {
-      const platformUserId = resolvePlatformUserId(account.extraConfig, account.username);
-      const upstreamDeleted = await adapter!.deleteApiToken(
-        site.url,
-        account.accessToken,
-        existing.token,
-        platformUserId,
-      );
-      if (!upstreamDeleted) {
-        return reply.code(502).send({ success: false, message: '站点删除令牌失败，本地未删除' });
-      }
-    }
-
-    await db.delete(schema.accountTokens).where(eq(schema.accountTokens.id, tokenId)).run();
-
-    if (existing.isDefault) {
-      repairDefaultToken(existing.accountId);
-    }
-
     return { success: true };
   });
 

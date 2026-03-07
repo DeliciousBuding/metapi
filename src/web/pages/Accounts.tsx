@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
+import CenteredModal from '../components/CenteredModal.js';
 import { useToast } from '../components/Toast.js';
 import ModernSelect from '../components/ModernSelect.js';
-import { useAnimatedVisibility } from '../components/useAnimatedVisibility.js';
-import { getAccountsAddPanelStyle } from './helpers/accountsPanelStyle.js';
 import {
   buildAddAccountPrereqHint,
   buildVerifyFailureHint,
@@ -14,9 +13,30 @@ import { clearFocusParams, readFocusAccountIntent } from './helpers/navigationFo
 import { TokensPanel } from './Tokens.js';
 import { tr } from '../i18n.js';
 import { buildCustomReorderUpdates, sortItemsForDisplay, type SortMode } from './helpers/listSorting.js';
+import { shouldIgnoreRowSelectionClick } from './helpers/rowSelection.js';
 import { SITE_DOCS_URL } from '../docsLink.js';
 
 type ConnectionsSegment = 'session' | 'apikey' | 'tokens';
+
+function createLoginForm() {
+  return { siteId: 0, username: '', password: '' };
+}
+
+function createTokenForm(credentialMode: 'session' | 'apikey' = 'session') {
+  return {
+    siteId: 0,
+    username: '',
+    accessToken: '',
+    platformUserId: '',
+    refreshToken: '',
+    tokenExpiresAt: '',
+    credentialMode,
+  };
+}
+
+function createRebindForm(platformUserId = '') {
+  return { accessToken: '', platformUserId, refreshToken: '', tokenExpiresAt: '' };
+}
 
 function isTruthyFlag(value: string | null): boolean {
   if (!value) return false;
@@ -46,33 +66,35 @@ export default function Accounts() {
   const [highlightAccountId, setHighlightAccountId] = useState<number | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [addMode, setAddMode] = useState<'token' | 'login'>('token');
-  const [loginForm, setLoginForm] = useState({ siteId: 0, username: '', password: '' });
-  const [tokenForm, setTokenForm] = useState({
-    siteId: 0,
-    username: '',
-    accessToken: '',
-    platformUserId: '',
-    refreshToken: '',
-    tokenExpiresAt: '',
-    credentialMode: 'session' as 'auto' | 'session' | 'apikey',
-  });
+  const [loginForm, setLoginForm] = useState(createLoginForm);
+  const [tokenForm, setTokenForm] = useState(() => createTokenForm('session'));
   const [verifyResult, setVerifyResult] = useState<any>(null);
   const [verifying, setVerifying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [embeddedTokenActions, setEmbeddedTokenActions] = useState<React.ReactNode>(null);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
+  const [batchActionLoading, setBatchActionLoading] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({
+    username: '',
+    status: 'active',
+    checkinEnabled: true,
+    unitCost: '',
+    accessToken: '',
+    apiToken: '',
+    isPinned: false,
+    refreshToken: '',
+    tokenExpiresAt: '',
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
   const [rebindTarget, setRebindTarget] = useState<any | null>(null);
-  const [rebindForm, setRebindForm] = useState({ accessToken: '', platformUserId: '', refreshToken: '', tokenExpiresAt: '' });
+  const [rebindForm, setRebindForm] = useState(() => createRebindForm());
   const [rebindVerifyResult, setRebindVerifyResult] = useState<any>(null);
   const [rebindVerifying, setRebindVerifying] = useState(false);
   const [rebindSaving, setRebindSaving] = useState(false);
-  const [highlightRebindPanel, setHighlightRebindPanel] = useState(false);
-  const [rebindFocusTrigger, setRebindFocusTrigger] = useState(0);
-  const addPanelPresence = useAnimatedVisibility(showAdd, 220);
-  const rebindPanelPresence = useAnimatedVisibility(Boolean(rebindTarget), 220);
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rebindPanelRef = useRef<HTMLDivElement | null>(null);
-  const rebindPanelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRebindTargetRef = useRef<any | null>(null);
   const toast = useToast();
   if (rebindTarget) lastRebindTargetRef.current = rebindTarget;
@@ -85,7 +107,9 @@ export default function Accounts() {
       api.getSites(),
     ]);
     if (accountsResult.status === 'fulfilled') {
-      setAccounts(accountsResult.value || []);
+      const nextAccounts = accountsResult.value || [];
+      setAccounts(nextAccounts);
+      setSelectedAccountIds((current) => current.filter((id) => nextAccounts.some((account: any) => account.id === id)));
     } else {
       toast.error('加载账号列表失败');
     }
@@ -101,6 +125,21 @@ export default function Accounts() {
     [sites, tokenForm.siteId],
   );
   const isSub2ApiSelected = (selectedTokenSite?.platform || '').toLowerCase() === 'sub2api';
+  const activeAddCredentialMode = activeSegment === 'apikey' ? 'apikey' : 'session';
+
+  const resetAddForms = (credentialMode: 'session' | 'apikey' = activeAddCredentialMode) => {
+    setAddMode('token');
+    setLoginForm(createLoginForm());
+    setTokenForm(createTokenForm(credentialMode));
+    setVerifyResult(null);
+  };
+
+  const closeAddPanel = () => {
+    setShowAdd(false);
+    setVerifying(false);
+    setSaving(false);
+    resetAddForms();
+  };
 
   const resolveAccountCredentialMode = (account: any): 'session' | 'apikey' => {
     const rawMode = String(account?.credentialMode || '').trim().toLowerCase();
@@ -147,9 +186,14 @@ export default function Accounts() {
 
   useEffect(() => {
     if (activeSegment !== 'tokens') return;
-    setShowAdd(false);
-    setVerifyResult(null);
+    closeAddPanel();
     if (rebindTarget) closeRebindPanel();
+    setEditingAccount(null);
+  }, [activeSegment]);
+
+  useEffect(() => {
+    if (activeSegment === 'tokens') return;
+    setEmbeddedTokenActions(null);
   }, [activeSegment]);
 
   useEffect(() => {
@@ -162,14 +206,10 @@ export default function Accounts() {
     setShowAdd(true);
     setAddMode('token');
     setVerifyResult(null);
+    setLoginForm(createLoginForm());
     setTokenForm({
+      ...createTokenForm('apikey'),
       siteId: requestedSiteId,
-      username: '',
-      accessToken: '',
-      platformUserId: '',
-      refreshToken: '',
-      tokenExpiresAt: '',
-      credentialMode: 'apikey',
     });
 
     params.delete('create');
@@ -190,9 +230,6 @@ export default function Accounts() {
       if (highlightTimerRef.current) {
         clearTimeout(highlightTimerRef.current);
       }
-      if (rebindPanelTimerRef.current) {
-        clearTimeout(rebindPanelTimerRef.current);
-      }
     };
   }, []);
 
@@ -202,8 +239,7 @@ export default function Accounts() {
     try {
       const result = await api.loginAccount(loginForm);
       if (result.success) {
-        setShowAdd(false);
-        setLoginForm({ siteId: 0, username: '', password: '' });
+        closeAddPanel();
         const msg = result.apiTokenFound
           ? `账号 "${loginForm.username}" 已添加，API Key 已自动获取`
           : `账号 "${loginForm.username}" 已添加（未找到 API Key，请手动设置）`;
@@ -271,17 +307,7 @@ export default function Accounts() {
           : undefined,
         credentialMode,
       });
-      setShowAdd(false);
-      setTokenForm({
-        siteId: 0,
-        username: '',
-        accessToken: '',
-        platformUserId: '',
-        refreshToken: '',
-        tokenExpiresAt: '',
-        credentialMode: 'session',
-      });
-      setVerifyResult(null);
+      closeAddPanel();
       if (result.tokenType === 'apikey') {
         toast.success('已添加为 API Key 账号（可用于代理转发）');
       } else {
@@ -422,6 +448,115 @@ export default function Accounts() {
     }
   };
 
+  const extractManagedSub2ApiAuth = (account: any) => {
+    try {
+      const parsed = JSON.parse(account?.extraConfig || '{}');
+      const auth = parsed?.sub2apiAuth || {};
+      return {
+        refreshToken: typeof auth.refreshToken === 'string' ? auth.refreshToken : '',
+        tokenExpiresAt: auth.tokenExpiresAt ? String(auth.tokenExpiresAt) : '',
+      };
+    } catch {
+      return { refreshToken: '', tokenExpiresAt: '' };
+    }
+  };
+
+  const openEditPanel = (account: any) => {
+    const managedAuth = extractManagedSub2ApiAuth(account);
+    closeAddPanel();
+    setRebindTarget(null);
+    setEditingAccount(account);
+    setEditForm({
+      username: account?.username || '',
+      status: account?.status || 'active',
+      checkinEnabled: account?.checkinEnabled !== false,
+      unitCost: account?.unitCost === null || account?.unitCost === undefined ? '' : String(account.unitCost),
+      accessToken: account?.accessToken || '',
+      apiToken: account?.apiToken || '',
+      isPinned: !!account?.isPinned,
+      refreshToken: managedAuth.refreshToken,
+      tokenExpiresAt: managedAuth.tokenExpiresAt,
+    });
+  };
+
+  const closeEditPanel = () => {
+    setEditingAccount(null);
+    setSavingEdit(false);
+  };
+
+  const saveEditPanel = async () => {
+    if (!editingAccount) return;
+    setSavingEdit(true);
+    try {
+      await api.updateAccount(editingAccount.id, {
+        username: editForm.username.trim() || undefined,
+        status: editForm.status,
+        checkinEnabled: editForm.checkinEnabled,
+        unitCost: editForm.unitCost.trim() ? Number(editForm.unitCost.trim()) : null,
+        accessToken: editForm.accessToken.trim(),
+        apiToken: editForm.apiToken.trim() || null,
+        isPinned: editForm.isPinned,
+        refreshToken: editForm.refreshToken.trim() || null,
+        tokenExpiresAt: editForm.tokenExpiresAt.trim() ? Number.parseInt(editForm.tokenExpiresAt.trim(), 10) : null,
+      });
+      toast.success('账号已更新');
+      closeEditPanel();
+      load();
+    } catch (e: any) {
+      toast.error(e.message || '更新账号失败');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const toggleAccountSelection = (accountId: number, checked: boolean) => {
+    setSelectedAccountIds((current) => (
+      checked
+        ? Array.from(new Set([...current, accountId]))
+        : current.filter((id) => id !== accountId)
+    ));
+  };
+
+  const toggleSelectAllVisibleAccounts = (checked: boolean) => {
+    if (!checked) {
+      setSelectedAccountIds([]);
+      return;
+    }
+    setSelectedAccountIds(visibleAccounts.map((account) => account.id));
+  };
+
+  const runBatchAccountAction = async (action: 'enable' | 'disable' | 'delete' | 'refreshBalance') => {
+    if (selectedAccountIds.length === 0) return;
+    if (action === 'delete' && typeof globalThis.confirm === 'function' && !globalThis.confirm(`确认删除选中的 ${selectedAccountIds.length} 个账号？`)) return;
+
+    setBatchActionLoading(true);
+    try {
+      const result = await api.batchUpdateAccounts({
+        ids: selectedAccountIds,
+        action,
+      });
+      const successIds = Array.isArray(result?.successIds) ? result.successIds.map((id: unknown) => Number(id)) : [];
+      const failedItems = Array.isArray(result?.failedItems) ? result.failedItems : [];
+      if (failedItems.length > 0) {
+        toast.info(`批量操作完成：成功 ${successIds.length}，失败 ${failedItems.length}`);
+      } else {
+        toast.success(`批量操作完成：成功 ${successIds.length}`);
+      }
+      setSelectedAccountIds(failedItems.map((item: any) => Number(item.id)).filter((id: number) => Number.isFinite(id) && id > 0));
+      load();
+    } catch (e: any) {
+      toast.error(e.message || '批量操作失败');
+    } finally {
+      setBatchActionLoading(false);
+    }
+  };
+
+  const handleAccountRowClick = (accountId: number, event: React.MouseEvent<HTMLTableRowElement>) => {
+    if (shouldIgnoreRowSelectionClick(event.target)) return;
+    const isSelected = selectedAccountIds.includes(accountId);
+    toggleAccountSelection(accountId, !isSelected);
+  };
+
   const extractPlatformUserId = (account: any): string => {
     try {
       const parsed = JSON.parse(account?.extraConfig || '{}');
@@ -434,39 +569,20 @@ export default function Accounts() {
   };
 
   const openRebindPanel = (account: any) => {
+    closeAddPanel();
+    setEditingAccount(null);
     setRebindTarget(account);
-    setRebindForm({
-      accessToken: '',
-      platformUserId: extractPlatformUserId(account),
-      refreshToken: '',
-      tokenExpiresAt: '',
-    });
+    setRebindForm(createRebindForm(extractPlatformUserId(account)));
     setRebindVerifyResult(null);
-    setRebindFocusTrigger((value) => value + 1);
   };
 
   const closeRebindPanel = () => {
     setRebindTarget(null);
-    setRebindForm({ accessToken: '', platformUserId: '', refreshToken: '', tokenExpiresAt: '' });
+    setRebindForm(createRebindForm());
     setRebindVerifyResult(null);
     setRebindVerifying(false);
     setRebindSaving(false);
-    setHighlightRebindPanel(false);
   };
-
-  useEffect(() => {
-    if (!rebindTarget || rebindFocusTrigger <= 0) return;
-
-    setHighlightRebindPanel(true);
-    rebindPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    if (rebindPanelTimerRef.current) {
-      clearTimeout(rebindPanelTimerRef.current);
-    }
-    rebindPanelTimerRef.current = setTimeout(() => {
-      setHighlightRebindPanel(false);
-    }, 2200);
-  }, [rebindFocusTrigger, rebindTarget]);
 
   const handleVerifyRebindToken = async () => {
     if (!rebindTarget || !rebindForm.accessToken.trim()) return;
@@ -598,13 +714,15 @@ export default function Accounts() {
             </button>
             <button
               onClick={() => {
-                setShowAdd(!showAdd);
-                setAddMode('token');
-                setVerifyResult(null);
-                setTokenForm((current) => ({
-                  ...current,
-                  credentialMode: activeSegment === 'apikey' ? 'apikey' : 'session',
-                }));
+                const nextOpen = !showAdd;
+                if (!nextOpen) {
+                  closeAddPanel();
+                  return;
+                }
+                setEditingAccount(null);
+                closeRebindPanel();
+                setShowAdd(true);
+                resetAddForms(activeAddCredentialMode);
               }}
               className="btn btn-primary"
             >
@@ -612,6 +730,7 @@ export default function Accounts() {
             </button>
           </div>
         )}
+        {activeSegment === 'tokens' && embeddedTokenActions}
       </div>
 
       <div
@@ -652,12 +771,36 @@ export default function Accounts() {
         ))}
       </div>
 
+      {activeSegment !== 'tokens' && selectedAccountIds.length > 0 && (
+        <div className="card" style={{ padding: 12, marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>已选 {selectedAccountIds.length} 项</span>
+          <button data-testid="accounts-batch-refresh-balance" onClick={() => runBatchAccountAction('refreshBalance')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+            批量刷新余额
+          </button>
+          <button onClick={() => runBatchAccountAction('enable')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+            批量启用
+          </button>
+          <button onClick={() => runBatchAccountAction('disable')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+            批量禁用
+          </button>
+          <button onClick={() => runBatchAccountAction('delete')} disabled={batchActionLoading} className="btn btn-link btn-link-danger">
+            批量删除
+          </button>
+        </div>
+      )}
+
       {activeSegment === 'tokens' ? (
-        <TokensPanel embedded />
+        <TokensPanel embedded onEmbeddedActionsChange={setEmbeddedTokenActions} />
       ) : (
         <>
-          {addPanelPresence.shouldRender && (
-            <div className={`card panel-presence ${addPanelPresence.isVisible ? '' : 'is-closing'}`.trim()} style={getAccountsAddPanelStyle()}>
+          <CenteredModal
+            open={showAdd}
+            onClose={closeAddPanel}
+            title={activeSegment === 'apikey' ? '添加 API Key 连接' : (addMode === 'login' ? '账号密码登录' : '添加 Session 连接')}
+            maxWidth={860}
+            bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+            footer={<button onClick={closeAddPanel} className="btn btn-ghost">取消</button>}
+          >
               {activeSegment === 'session' ? (
                 <>
                   <div style={{ display: 'flex', gap: 0, background: 'var(--color-bg)', borderRadius: 'var(--radius-sm)', padding: 3, marginBottom: 16 }}>
@@ -967,21 +1110,19 @@ export default function Accounts() {
                   )}
                 </div>
               )}
-            </div>
-          )}
+          </CenteredModal>
 
-          {activeSegment === 'session' && rebindPanelPresence.shouldRender && activeRebindTarget && (
-            <div
-              ref={rebindPanelRef}
-              className={`card panel-presence rebind-panel ${rebindPanelPresence.isVisible ? '' : 'is-closing'} ${highlightRebindPanel ? 'rebind-panel-highlight' : ''}`.trim()}
-              style={{ marginBottom: 16, padding: 16 }}
+          {activeSegment === 'session' && (
+            <CenteredModal
+              open={Boolean(rebindTarget)}
+              onClose={closeRebindPanel}
+              title="重新绑定 Session Token"
+              maxWidth={820}
+              bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+              footer={<button onClick={closeRebindPanel} className="btn btn-ghost">取消</button>}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--color-text-primary)' }}>
-                  重新绑定 Session Token
-                </div>
-                <button className="btn btn-ghost" onClick={closeRebindPanel}>关闭</button>
-              </div>
+              {activeRebindTarget ? (
+                <>
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>
                 连接: {resolveAccountDisplayName(activeRebindTarget)} @ {activeRebindTarget.site?.name || '-'}。请粘贴新的 Session Token，验证成功后再绑定。
               </div>
@@ -1064,14 +1205,102 @@ export default function Accounts() {
                     : '确认重新绑定'}
                 </button>
               </div>
-            </div>
+                </>
+              ) : null}
+            </CenteredModal>
           )}
+
+          <CenteredModal
+            open={Boolean(editingAccount)}
+            onClose={closeEditPanel}
+            title="编辑账号"
+            maxWidth={860}
+            bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+            footer={(
+              <>
+                <button onClick={closeEditPanel} className="btn btn-ghost">取消</button>
+                <button onClick={saveEditPanel} disabled={savingEdit} className="btn btn-primary">
+                  {savingEdit ? <><span className="spinner spinner-sm" style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.3)' }} /> 保存中...</> : '保存修改'}
+                </button>
+              </>
+            )}
+          >
+            {editingAccount ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <input
+                  placeholder="账号名称"
+                  value={editForm.username}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, username: e.target.value }))}
+                  style={inputStyle}
+                />
+                <ModernSelect
+                  value={editForm.status}
+                  onChange={(value) => setEditForm((prev) => ({ ...prev, status: value }))}
+                  options={[
+                    { value: 'active', label: 'active' },
+                    { value: 'disabled', label: 'disabled' },
+                    { value: 'expired', label: 'expired' },
+                  ]}
+                  placeholder="状态"
+                />
+                <input
+                  placeholder="单位成本（可选）"
+                  value={editForm.unitCost}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, unitCost: e.target.value }))}
+                  style={inputStyle}
+                />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, ...inputStyle }}>
+                  <input
+                    type="checkbox"
+                    checked={editForm.checkinEnabled}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, checkinEnabled: e.target.checked }))}
+                  />
+                  启用签到
+                </label>
+                <input
+                  placeholder="Access Token"
+                  value={editForm.accessToken}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, accessToken: e.target.value }))}
+                  style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+                />
+                <input
+                  placeholder="API Token（可选）"
+                  value={editForm.apiToken}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, apiToken: e.target.value }))}
+                  style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+                />
+                {((editingAccount?.site?.platform || '').toLowerCase() === 'sub2api') && (
+                  <>
+                    <input
+                      placeholder="Sub2API refresh_token（可选）"
+                      value={editForm.refreshToken}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, refreshToken: e.target.value }))}
+                      style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+                    />
+                    <input
+                      placeholder="token_expires_at（可选）"
+                      value={editForm.tokenExpiresAt}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, tokenExpiresAt: e.target.value.replace(/\D/g, '') }))}
+                      style={inputStyle}
+                    />
+                  </>
+                )}
+              </div>
+            ) : null}
+          </CenteredModal>
 
           <div className="card">
             {visibleAccounts.length > 0 ? (
               <table className="data-table accounts-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 44 }}>
+                      <input
+                        type="checkbox"
+                        checked={visibleAccounts.length > 0 && selectedAccountIds.length === visibleAccounts.length}
+                        onChange={(e) => toggleSelectAllVisibleAccounts(e.target.checked)}
+                      />
+                    </th>
                     <th>连接名称</th>
                     <th>站点</th>
                     <th>运行健康状态</th>
@@ -1088,21 +1317,28 @@ export default function Accounts() {
                     return (
                       <tr
                         key={a.id}
+                        data-testid={`account-row-${a.id}`}
                         ref={(node) => {
                           if (node) rowRefs.current.set(a.id, node);
                           else rowRefs.current.delete(a.id);
                         }}
-                        className={`animate-slide-up stagger-${Math.min(i + 1, 5)} ${highlightAccountId === a.id ? 'row-focus-highlight' : ''}`}
+                        onClick={(event) => handleAccountRowClick(a.id, event)}
+                        className={`animate-slide-up stagger-${Math.min(i + 1, 5)} row-selectable ${selectedAccountIds.includes(a.id) ? 'row-selected' : ''} ${highlightAccountId === a.id ? 'row-focus-highlight' : ''}`.trim()}
                       >
+                        <td>
+                          <input
+                            data-testid={`account-select-${a.id}`}
+                            type="checkbox"
+                            checked={selectedAccountIds.includes(a.id)}
+                            onChange={(e) => toggleAccountSelection(a.id, e.target.checked)}
+                          />
+                        </td>
                         <td style={{ color: 'var(--color-text-primary)' }}>
                           <div style={{ fontWeight: 600 }}>{resolveAccountDisplayName(a)}</div>
                           <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
                             <span className={`badge ${connectionMode === 'apikey' ? 'badge-warning' : 'badge-info'}`} style={{ fontSize: 10 }}>
                               {connectionMode === 'apikey' ? 'API Key' : 'Session'}
                             </span>
-                            {capabilities.proxyOnly && (
-                              <span className="badge badge-muted" style={{ fontSize: 10 }}>仅代理</span>
-                            )}
                           </div>
                         </td>
                         <td>
@@ -1229,6 +1465,9 @@ export default function Accounts() {
                                 重新绑定
                               </button>
                             )}
+                            <button onClick={() => openEditPanel(a)} className="btn btn-link btn-link-info">
+                              编辑
+                            </button>
                             <button onClick={() => withLoading(`delete-${a.id}`, () => api.deleteAccount(a.id), '已删除')} disabled={actionLoading[`delete-${a.id}`]} className="btn btn-link btn-link-danger">
                               {actionLoading[`delete-${a.id}`] ? <span className="spinner spinner-sm" /> : '删除'}
                             </button>

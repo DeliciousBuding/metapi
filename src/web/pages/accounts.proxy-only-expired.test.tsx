@@ -76,7 +76,7 @@ describe('Accounts proxy-only expired state', () => {
       await flushMicrotasks();
 
       const rendered = JSON.stringify(root.toJSON());
-      expect(rendered).toContain('仅代理');
+      expect(rendered).not.toContain('仅代理');
       expect(rendered).not.toContain('访问令牌已过期');
 
       const actionTexts = root.root.findAll((node) => node.type === 'button').map((node) => collectText(node));

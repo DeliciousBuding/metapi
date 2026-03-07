@@ -35,6 +35,28 @@ describe('accountHealthService', () => {
     expect(health.reason).not.toContain('访问令牌已过期');
   });
 
+  it('ignores stored auth failures for proxy-only accounts', () => {
+    const health = buildRuntimeHealthForAccount({
+      accountStatus: 'active',
+      siteStatus: 'active',
+      sessionCapable: false,
+      extraConfig: JSON.stringify({
+        runtimeHealth: {
+          state: 'unhealthy',
+          reason: '访问令牌失效：无权进行此操作，access token 无效',
+          source: 'auth',
+          checkedAt: '2026-03-07T09:00:01.432Z',
+        },
+      }),
+    });
+
+    expect(health).toMatchObject({
+      state: 'unknown',
+      source: 'none',
+    });
+    expect(health.reason).not.toContain('访问令牌');
+  });
+
   it('returns stored runtime health from extra config when available', () => {
     const health = buildRuntimeHealthForAccount({
       accountStatus: 'active',

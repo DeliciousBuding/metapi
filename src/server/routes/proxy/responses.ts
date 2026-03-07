@@ -8,7 +8,7 @@ import { isTokenExpiredError } from '../../services/alertRules.js';
 import { shouldRetryProxyRequest } from '../../services/proxyRetryPolicy.js';
 import { resolveProxyUsageWithSelfLogFallback } from '../../services/proxyUsageFallbackService.js';
 import { mergeProxyUsage, parseProxyUsage } from '../../services/proxyUsageParser.js';
-import { withExplicitProxyRequestInit } from '../../services/siteProxy.js';
+import { resolveProxyUrlForSite, withSiteRecordProxyRequestInit } from '../../services/siteProxy.js';
 import {
   createStreamTransformContext,
   normalizeUpstreamFinalResponse,
@@ -1137,15 +1137,19 @@ function serializeConvertedResponsesEvents(input: {
 }
 
 export async function responsesProxyRoute(app: FastifyInstance) {
-  app.post('/v1/responses', async (request: FastifyRequest, reply: FastifyReply) => {
+  const handleResponsesRequest = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    downstreamPath: string,
+  ) => {
     const body = request.body as any;
     const requestedModel = typeof body?.model === 'string' ? body.model.trim() : '';
-    const downstreamPath = '/v1/responses';
     if (!requestedModel) {
       return reply.code(400).send({ error: { message: 'model is required', type: 'invalid_request_error' } });
     }
     if (!await ensureModelAllowedForDownstreamKey(request, reply, requestedModel)) return;
     const downstreamPolicy = getDownstreamRoutingPolicy(request);
+    const isCompactRequest = downstreamPath === '/v1/responses/compact';
 
     const isStream = body.stream === true;
     const excludeChannelIds: number[] = [];
@@ -1193,7 +1197,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
       try {
         const endpointResult = await executeEndpointFlow({
           siteUrl: selected.site.url,
-          proxyUrl: selected.site.proxyUrl,
+          proxyUrl: resolveProxyUrlForSite(selected.site),
           endpointCandidates,
           buildRequest: (endpoint) => {
             const endpointRequest = buildUpstreamEndpointRequest({
@@ -1208,9 +1212,14 @@ export async function responsesProxyRoute(app: FastifyInstance) {
               responsesOriginalBody: body,
               downstreamHeaders: request.headers as Record<string, unknown>,
             });
+            const upstreamPath = (
+              isCompactRequest && endpoint === 'responses'
+                ? `${endpointRequest.path}/compact`
+                : endpointRequest.path
+            );
             return {
               endpoint,
-              path: endpointRequest.path,
+              path: upstreamPath,
               headers: endpointRequest.headers,
               body: endpointRequest.body as Record<string, unknown>,
             };
@@ -1231,7 +1240,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
                 for (const compatibilityBody of compatibilityBodies) {
                   const compatibilityResponse = await fetch(
                     ctx.targetUrl,
-                    withExplicitProxyRequestInit(selected.site.proxyUrl, {
+                    withSiteRecordProxyRequestInit(selected.site, {
                       method: 'POST',
                       headers: compatibilityHeadersCandidate,
                       body: JSON.stringify(compatibilityBody),
@@ -1266,7 +1275,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
             });
             const minimalResponse = await fetch(
               ctx.targetUrl,
-              withExplicitProxyRequestInit(selected.site.proxyUrl, {
+              withSiteRecordProxyRequestInit(selected.site, {
                 method: 'POST',
                 headers: minimalHeaders,
                 body: JSON.stringify(ctx.request.body),
@@ -1554,7 +1563,12 @@ export async function responsesProxyRoute(app: FastifyInstance) {
         });
       }
     }
-  });
+  };
+
+  app.post('/v1/responses', async (request: FastifyRequest, reply: FastifyReply) =>
+    handleResponsesRequest(request, reply, '/v1/responses'));
+  app.post('/v1/responses/compact', async (request: FastifyRequest, reply: FastifyReply) =>
+    handleResponsesRequest(request, reply, '/v1/responses/compact'));
 }
 
 async function logProxy(

@@ -24,6 +24,7 @@ type RuntimeSettings = {
   balanceRefreshCron: string;
   routingFallbackUnitCost: number;
   routingWeights: RoutingWeights;
+  systemProxyUrl: string;
   proxyTokenMasked?: string;
   adminIpAllowlist?: string[];
   currentAdminIp?: string;
@@ -178,12 +179,14 @@ export default function Settings() {
     balanceRefreshCron: '0 * * * *',
     routingFallbackUnitCost: 1,
     routingWeights: defaultWeights,
+    systemProxyUrl: '',
   });
   const [proxyTokenSuffix, setProxyTokenSuffix] = useState('');
   const [maskedToken, setMaskedToken] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [savingToken, setSavingToken] = useState(false);
+  const [savingSystemProxy, setSavingSystemProxy] = useState(false);
   const [savingRouting, setSavingRouting] = useState(false);
   const [showAdvancedRouting, setShowAdvancedRouting] = useState(false);
   const [savingSecurity, setSavingSecurity] = useState(false);
@@ -367,6 +370,7 @@ export default function Settings() {
           ...defaultWeights,
           ...(runtimeInfo.routingWeights || {}),
         },
+        systemProxyUrl: typeof runtimeInfo.systemProxyUrl === 'string' ? runtimeInfo.systemProxyUrl : '',
         proxyTokenMasked: runtimeInfo.proxyTokenMasked || '',
         adminIpAllowlist: Array.isArray(runtimeInfo.adminIpAllowlist)
           ? runtimeInfo.adminIpAllowlist.filter((item: unknown) => typeof item === 'string')
@@ -455,6 +459,26 @@ export default function Settings() {
       toast.error(err?.message || '保存失败');
     } finally {
       setSavingToken(false);
+    }
+  };
+
+  const saveSystemProxy = async () => {
+    setSavingSystemProxy(true);
+    try {
+      const res = await api.updateRuntimeSettings({
+        systemProxyUrl: runtime.systemProxyUrl.trim(),
+      });
+      setRuntime((prev) => ({
+        ...prev,
+        systemProxyUrl: typeof res?.systemProxyUrl === 'string'
+          ? res.systemProxyUrl
+          : prev.systemProxyUrl,
+      }));
+      toast.success('系统代理已保存');
+    } catch (err: any) {
+      toast.error(err?.message || '保存失败');
+    } finally {
+      setSavingSystemProxy(false);
     }
   };
 
@@ -851,6 +875,22 @@ export default function Settings() {
         </div>
 
         <div className="card animate-slide-up stagger-3" style={{ padding: 20 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>系统代理</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>
+            配置一个全局出站代理地址，站点页可按站点决定是否启用系统代理。
+          </div>
+          <input
+            value={runtime.systemProxyUrl}
+            onChange={(e) => setRuntime((prev) => ({ ...prev, systemProxyUrl: e.target.value }))}
+            placeholder="系统代理 URL（可选，如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080）"
+            style={{ ...inputStyle, fontFamily: 'var(--font-mono)', marginBottom: 10 }}
+          />
+          <button onClick={saveSystemProxy} disabled={savingSystemProxy} className="btn btn-primary">
+            {savingSystemProxy ? <><span className="spinner spinner-sm" style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.3)' }} /> 保存中...</> : '保存系统代理'}
+          </button>
+        </div>
+
+        <div className="card animate-slide-up stagger-4" style={{ padding: 20 }}>
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>下游访问令牌（PROXY_TOKEN）</div>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>
             用于下游站点或客户端访问本服务代理接口。前缀 sk- 固定不可修改，只需填写后缀。
@@ -902,7 +942,7 @@ export default function Settings() {
           </button>
         </div>
 
-        <div className="card animate-slide-up stagger-4" style={{ padding: 20 }}>
+        <div className="card animate-slide-up stagger-5" style={{ padding: 20 }}>
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>下游 API Key 策略（按项目/分组）</div>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>
             每个下游 Key 可独立配置过期、额度，并通过勾选界面限制可访问的模型与群组。

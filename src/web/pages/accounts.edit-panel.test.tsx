@@ -8,6 +8,8 @@ const { apiMock } = vi.hoisted(() => ({
   apiMock: {
     getAccounts: vi.fn(),
     getSites: vi.fn(),
+    updateAccount: vi.fn(),
+    refreshAccountHealth: vi.fn(),
   },
 }));
 
@@ -16,8 +18,7 @@ vi.mock('../api.js', () => ({
 }));
 
 function collectText(node: ReactTestInstance): string {
-  const children = node.children || [];
-  return children.map((child) => {
+  return (node.children || []).map((child) => {
     if (typeof child === 'string') return child;
     return collectText(child);
   }).join('');
@@ -30,34 +31,31 @@ async function flushMicrotasks() {
   });
 }
 
-describe('Accounts rebind modal', () => {
+describe('Accounts edit panel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMock.getSites.mockResolvedValue([
+      { id: 1, name: 'Site A', platform: 'new-api', status: 'active' },
+    ]);
+    apiMock.getAccounts.mockResolvedValue([
+      {
+        id: 1,
+        siteId: 1,
+        username: 'alpha',
+        accessToken: 'session-alpha',
+        status: 'active',
+        site: { id: 1, name: 'Site A', status: 'active', platform: 'new-api' },
+      },
+    ]);
+    apiMock.updateAccount.mockResolvedValue({ success: true });
+    apiMock.refreshAccountHealth.mockResolvedValue({ success: true });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('opens centered rebind modal when clicking rebind action', async () => {
-    apiMock.getAccounts.mockResolvedValue([
-      {
-        id: 1,
-        username: 'tester',
-        balance: 100,
-        balanceUsed: 0,
-        todayReward: 0,
-        todaySpend: 0,
-        accessToken: 'session-token',
-        status: 'expired',
-        checkinEnabled: true,
-        siteId: 10,
-        site: { id: 10, name: 'Demo Site', status: 'active', url: 'https://example.com' },
-        runtimeHealth: { state: 'unhealthy', reason: '访问令牌失效' },
-      },
-    ]);
-    apiMock.getSites.mockResolvedValue([{ id: 10, name: 'Demo Site', platform: 'new-api', status: 'active' }]);
-
+  it('opens edit panel from account row action', async () => {
     let root: ReturnType<typeof create> | null = null;
     try {
       await act(async () => {
@@ -71,25 +69,22 @@ describe('Accounts rebind modal', () => {
       });
       await flushMicrotasks();
 
-      const rebindButton = root.root.find((node) => (
+      const editButton = root.root.find((node) => (
         node.type === 'button'
         && typeof node.props.onClick === 'function'
-        && collectText(node).trim() === '重新绑定'
+        && collectText(node).trim() === '编辑'
       ));
 
       await act(async () => {
-        rebindButton.props.onClick();
+        editButton.props.onClick();
       });
       await flushMicrotasks();
 
-      const modal = root.root.find((node) => (
-        node.type === 'div'
-        && typeof node.props.className === 'string'
-        && node.props.className.includes('modal-content')
+      const usernameInput = root.root.find((node) => (
+        node.type === 'input'
+        && node.props.placeholder === '账号名称'
       ));
-      expect(String(modal.props.className)).toContain('modal-content');
-      expect(JSON.stringify(root.toJSON())).toContain('重新绑定 Session Token');
-      expect(JSON.stringify(root.toJSON())).toContain('粘贴新的 Session Token');
+      expect(usernameInput.props.value).toBe('alpha');
     } finally {
       root?.unmount();
     }

@@ -8,7 +8,7 @@ import { isTokenExpiredError } from '../../services/alertRules.js';
 import { estimateProxyCost } from '../../services/modelPricingService.js';
 import { shouldRetryProxyRequest } from '../../services/proxyRetryPolicy.js';
 import { ensureModelAllowedForDownstreamKey, getDownstreamRoutingPolicy, recordDownstreamCostUsage } from './downstreamPolicy.js';
-import { withExplicitProxyRequestInit } from '../../services/siteProxy.js';
+import { withSiteRecordProxyRequestInit } from '../../services/siteProxy.js';
 import { composeProxyLogMessage } from './logPathMeta.js';
 import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 
@@ -50,7 +50,7 @@ export async function imagesProxyRoute(app: FastifyInstance) {
       const startTime = Date.now();
 
       try {
-        const upstream = await fetch(targetUrl, withExplicitProxyRequestInit(selected.site.proxyUrl, {
+        const upstream = await fetch(targetUrl, withSiteRecordProxyRequestInit(selected.site, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

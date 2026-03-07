@@ -4,6 +4,7 @@ import { getAdapter } from './platforms/index.js';
 import { ensureDefaultTokenForAccount, getPreferredAccountToken } from './accountTokenService.js';
 import { getCredentialModeFromExtraConfig, resolvePlatformUserId } from './accountExtraConfig.js';
 import { invalidateTokenRouterCache } from './tokenRouter.js';
+import { setAccountRuntimeHealth } from './accountHealthService.js';
 
 const API_TOKEN_DISCOVERY_TIMEOUT_MS = 8_000;
 const MODEL_DISCOVERY_TIMEOUT_MS = 12_000;
@@ -213,6 +214,15 @@ export async function refreshModelsForAccount(accountId: number) {
         checkedAt,
       })),
     ).run();
+
+    if (isApiKeyConnection(account)) {
+      await setAccountRuntimeHealth(account.id, {
+        state: 'healthy',
+        reason: '模型探测成功',
+        source: 'model-discovery',
+        checkedAt,
+      });
+    }
   }
 
   return {

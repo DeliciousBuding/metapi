@@ -19,3 +19,7 @@ tmp/*
 Thumbs.db
 docker/data/
 docker/.env
+
+# Local planning docs
+docs/plan/
+docs/plans/

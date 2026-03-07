@@ -16,11 +16,13 @@ import {
 } from '../../services/databaseMigrationService.js';
 import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 import { extractClientIp, isIpAllowed } from '../../middleware/auth.js';
+import { invalidateSiteProxyCache, normalizeSiteProxyUrl } from '../../services/siteProxy.js';
 
 type RoutingWeights = typeof config.routingWeights;
 
 interface RuntimeSettingsBody {
   proxyToken?: string;
+  systemProxyUrl?: string;
   checkinCron?: string;
   balanceRefreshCron?: string;
   webhookUrl?: string;
@@ -154,6 +156,11 @@ function applyImportedSettingToRuntime(key: string, value: unknown) {
       const nextToken = value.trim();
       if (!isValidProxyToken(nextToken)) return;
       config.proxyToken = nextToken;
+      return;
+    }
+    case 'system_proxy_url': {
+      if (typeof value !== 'string') return;
+      config.systemProxyUrl = normalizeSiteProxyUrl(value) || '';
       return;
     }
     case 'webhook_url': {
@@ -295,6 +302,7 @@ function getRuntimeSettingsResponse(currentAdminIp = '') {
     notifyCooldownSec: config.notifyCooldownSec,
     adminIpAllowlist: config.adminIpAllowlist,
     currentAdminIp,
+    systemProxyUrl: config.systemProxyUrl,
     proxyTokenMasked: maskSecret(config.proxyToken),
   };
 }
@@ -469,6 +477,22 @@ export async function settingsRoutes(app: FastifyInstance) {
       }
       config.proxyToken = proxyToken;
       upsertSetting('proxy_token', proxyToken);
+    }
+
+    if (body.systemProxyUrl !== undefined) {
+      const rawSystemProxyUrl = String(body.systemProxyUrl || '').trim();
+      const normalizedSystemProxyUrl = rawSystemProxyUrl
+        ? normalizeSiteProxyUrl(rawSystemProxyUrl)
+        : '';
+      if (rawSystemProxyUrl && !normalizedSystemProxyUrl) {
+        return reply.code(400).send({ success: false, message: '系统代理地址无效，请填写合法的 http(s)/socks 代理 URL' });
+      }
+      if (normalizedSystemProxyUrl !== config.systemProxyUrl) {
+        changedLabels.push('系统代理');
+      }
+      config.systemProxyUrl = normalizedSystemProxyUrl || '';
+      upsertSetting('system_proxy_url', config.systemProxyUrl);
+      invalidateSiteProxyCache();
     }
 
     if (body.webhookUrl !== undefined) {
@@ -887,4 +911,3 @@ export async function settingsRoutes(app: FastifyInstance) {
     };
   });
 }
-

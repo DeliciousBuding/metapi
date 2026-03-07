@@ -45,6 +45,7 @@ export function buildConfig(env: NodeJS.ProcessEnv) {
   return {
     authToken: env.AUTH_TOKEN || 'change-me-admin-token',
     proxyToken: env.PROXY_TOKEN || 'change-me-proxy-sk-token',
+    systemProxyUrl: env.SYSTEM_PROXY_URL || '',
     accountCredentialSecret: env.ACCOUNT_CREDENTIAL_SECRET || env.AUTH_TOKEN || 'change-me-admin-token',
     checkinCron: env.CHECKIN_CRON || '0 8 * * *',
     balanceRefreshCron: env.BALANCE_REFRESH_CRON || '0 * * * *',

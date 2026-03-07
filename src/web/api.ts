@@ -103,6 +103,7 @@ export const api = {
   addSite: (data: any) => request('/api/sites', { method: 'POST', body: JSON.stringify(data) }),
   updateSite: (id: number, data: any) => request(`/api/sites/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSite: (id: number) => request(`/api/sites/${id}`, { method: 'DELETE' }),
+  batchUpdateSites: (data: any) => request('/api/sites/batch', { method: 'POST', body: JSON.stringify(data) }),
   detectSite: (url: string) => request('/api/sites/detect', { method: 'POST', body: JSON.stringify({ url }) }),
 
   // Accounts
@@ -114,6 +115,7 @@ export const api = {
     request(`/api/accounts/${id}/rebind-session`, { method: 'POST', body: JSON.stringify(data) }),
   updateAccount: (id: number, data: any) => request(`/api/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAccount: (id: number) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
+  batchUpdateAccounts: (data: any) => request('/api/accounts/batch', { method: 'POST', body: JSON.stringify(data) }),
   refreshBalance: (id: number) => request(`/api/accounts/${id}/balance`, { method: 'POST' }),
   refreshAccountHealth: (data?: { accountId?: number; wait?: boolean }) => request('/api/accounts/health/refresh', {
     method: 'POST',
@@ -126,6 +128,7 @@ export const api = {
   addAccountToken: (data: any) => request('/api/account-tokens', { method: 'POST', body: JSON.stringify(data) }),
   updateAccountToken: (id: number, data: any) => request(`/api/account-tokens/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAccountToken: (id: number) => request(`/api/account-tokens/${id}`, { method: 'DELETE' }),
+  batchUpdateAccountTokens: (data: any) => request('/api/account-tokens/batch', { method: 'POST', body: JSON.stringify(data) }),
   getAccountTokenGroups: (accountId: number) => request(`/api/account-tokens/groups/${accountId}`),
   setDefaultAccountToken: (id: number) => request(`/api/account-tokens/${id}/default`, { method: 'POST' }),
   getAccountTokenValue: (id: number) => request(`/api/account-tokens/${id}/value`),

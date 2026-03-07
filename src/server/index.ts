@@ -111,6 +111,9 @@ function applyRuntimeSettings(settingsMap: Map<string, string>) {
   const proxyToken = parseSettingFromMap<string>(settingsMap, 'proxy_token');
   if (typeof proxyToken === 'string' && proxyToken) config.proxyToken = proxyToken;
 
+  const systemProxyUrl = parseSettingFromMap<string>(settingsMap, 'system_proxy_url');
+  if (typeof systemProxyUrl === 'string') config.systemProxyUrl = systemProxyUrl;
+
   const checkinCron = parseSettingFromMap<string>(settingsMap, 'checkin_cron');
   if (typeof checkinCron === 'string' && checkinCron) config.checkinCron = checkinCron;
 

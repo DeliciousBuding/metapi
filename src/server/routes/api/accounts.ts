@@ -25,7 +25,7 @@ import {
   type RuntimeHealthState,
 } from '../../services/accountHealthService.js';
 import { appendSessionTokenRebindHint } from '../../services/alertRules.js';
-import { withExplicitProxyRequestInit } from '../../services/siteProxy.js';
+import { withSiteRecordProxyRequestInit } from '../../services/siteProxy.js';
 
 type AccountWithSiteRow = {
   accounts: typeof schema.accounts.$inferSelect;
@@ -80,6 +80,13 @@ function buildCapabilitiesFromCredentialMode(
 function buildCapabilitiesForAccount(account: typeof schema.accounts.$inferSelect): AccountCapabilities {
   const credentialMode = resolveStoredCredentialMode(account);
   return buildCapabilitiesFromCredentialMode(credentialMode, hasSessionTokenValue(account.accessToken));
+}
+
+function normalizeBatchIds(input: unknown): number[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => Number.parseInt(String(item), 10))
+    .filter((id) => Number.isFinite(id) && id > 0);
 }
 
 function normalizePinnedFlag(input: unknown): boolean | null {
@@ -345,6 +352,19 @@ export async function accountsRoutes(app: FastifyInstance) {
       spendByAccount[row.accountId] = Number(row.totalSpend || 0);
     }
 
+    const modelCountRows = await db.select({
+      accountId: schema.modelAvailability.accountId,
+      modelCount: sql<number>`count(*)`,
+    }).from(schema.modelAvailability)
+      .where(eq(schema.modelAvailability.available, true))
+      .groupBy(schema.modelAvailability.accountId)
+      .all();
+    const modelCountByAccount: Record<number, number> = {};
+    for (const row of modelCountRows) {
+      if (row.accountId == null) continue;
+      modelCountByAccount[row.accountId] = Number(row.modelCount || 0);
+    }
+
     // Aggregate today's checkin rewards per account
     const todayCheckins = await db.select({
       accountId: schema.checkinLogs.accountId,
@@ -394,6 +414,7 @@ export async function accountsRoutes(app: FastifyInstance) {
             credentialMode,
             hasSessionTokenValue(r.accounts.accessToken),
           ).canRefreshBalance,
+          hasDiscoveredModels: (modelCountByAccount[r.accounts.id] || 0) > 0,
         }),
       };
     });
@@ -584,7 +605,7 @@ export async function accountsRoutes(app: FastifyInstance) {
           try {
             const testRes = await fetch(
               `${site.url}/api/user/self`,
-              withExplicitProxyRequestInit(site.proxyUrl, {
+              withSiteRecordProxyRequestInit(site, {
                 headers,
                 signal: AbortSignal.timeout(ACCOUNT_VERIFY_DIAG_TIMEOUT_MS),
               }),
@@ -763,7 +784,7 @@ export async function accountsRoutes(app: FastifyInstance) {
           try {
             const testRes = await fetch(
               `${site.url}/api/user/self`,
-              withExplicitProxyRequestInit(site.proxyUrl, {
+              withSiteRecordProxyRequestInit(site, {
                 headers,
                 signal: AbortSignal.timeout(ACCOUNT_VERIFY_DIAG_TIMEOUT_MS),
               }),
@@ -1191,6 +1212,68 @@ export async function accountsRoutes(app: FastifyInstance) {
       await rebuildTokenRoutesFromAvailability();
     } catch { }
     return { success: true };
+  });
+
+  app.post<{ Body?: { ids?: number[]; action?: string } }>('/api/accounts/batch', async (request, reply) => {
+    const ids = normalizeBatchIds(request.body?.ids);
+    const action = String(request.body?.action || '').trim();
+    if (ids.length === 0) {
+      return reply.code(400).send({ message: 'ids is required' });
+    }
+    if (!['enable', 'disable', 'delete', 'refreshBalance'].includes(action)) {
+      return reply.code(400).send({ message: 'Invalid action' });
+    }
+
+    const successIds: number[] = [];
+    const failedItems: Array<{ id: number; message: string }> = [];
+    let shouldRebuildRoutes = false;
+
+    for (const id of ids) {
+      try {
+        if (action === 'refreshBalance') {
+          const result = await refreshBalance(id);
+          if (!result) {
+            failedItems.push({ id, message: 'Account not found or balance refresh unsupported' });
+            continue;
+          }
+          successIds.push(id);
+          continue;
+        }
+
+        const existing = await db.select().from(schema.accounts).where(eq(schema.accounts.id, id)).get();
+        if (!existing) {
+          failedItems.push({ id, message: 'Account not found' });
+          continue;
+        }
+
+        if (action === 'delete') {
+          await db.delete(schema.accounts).where(eq(schema.accounts.id, id)).run();
+          shouldRebuildRoutes = true;
+        } else {
+          const nextStatus = action === 'enable' ? 'active' : 'disabled';
+          await db.update(schema.accounts)
+            .set({ status: nextStatus, updatedAt: new Date().toISOString() })
+            .where(eq(schema.accounts.id, id))
+            .run();
+        }
+
+        successIds.push(id);
+      } catch (error: any) {
+        failedItems.push({ id, message: error?.message || 'Batch operation failed' });
+      }
+    }
+
+    if (shouldRebuildRoutes) {
+      try {
+        await rebuildTokenRoutesFromAvailability();
+      } catch { }
+    }
+
+    return {
+      success: true,
+      successIds,
+      failedItems,
+    };
   });
 
   app.post<{ Body?: { accountId?: number; wait?: boolean } }>('/api/accounts/health/refresh', async (request, reply) => {

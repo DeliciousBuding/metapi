@@ -9,7 +9,7 @@ import { shouldRetryProxyRequest } from '../../services/proxyRetryPolicy.js';
 import { resolveProxyUsageWithSelfLogFallback } from '../../services/proxyUsageFallbackService.js';
 import { mergeProxyUsage, parseProxyUsage, pullSseDataEvents } from '../../services/proxyUsageParser.js';
 import { ensureModelAllowedForDownstreamKey, getDownstreamRoutingPolicy, recordDownstreamCostUsage } from './downstreamPolicy.js';
-import { withExplicitProxyRequestInit } from '../../services/siteProxy.js';
+import { withSiteRecordProxyRequestInit } from '../../services/siteProxy.js';
 import { composeProxyLogMessage } from './logPathMeta.js';
 import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 import { resolveProxyLogBilling } from './proxyBilling.js';
@@ -57,7 +57,7 @@ export async function completionsProxyRoute(app: FastifyInstance) {
       const startTime = Date.now();
 
       try {
-        const upstream = await fetch(targetUrl, withExplicitProxyRequestInit(selected.site.proxyUrl, {
+        const upstream = await fetch(targetUrl, withSiteRecordProxyRequestInit(selected.site, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

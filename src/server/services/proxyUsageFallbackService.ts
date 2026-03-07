@@ -4,7 +4,7 @@ import {
   buildNewApiCookieCandidates,
   fetchJsonWithShieldCookieRetry,
 } from './platforms/newApiShield.js';
-import { withExplicitProxyRequestInit } from './siteProxy.js';
+import { withExplicitProxyRequestInit, withSiteRecordProxyRequestInit } from './siteProxy.js';
 
 const SELF_LOG_FETCH_TIMEOUT_MS = 8_000;
 const SELF_LOG_PAGE_SIZE = 20;
@@ -28,6 +28,7 @@ interface ProxyUsageFallbackInput {
     url: string;
     platform: string;
     apiKey?: string | null;
+    useSystemProxy?: boolean | null;
     proxyUrl?: string | null;
   };
   account: {
@@ -358,7 +359,7 @@ async function fetchSelfLogPayload(baseUrl: string, token: string, input: ProxyU
         page_size: String(SELF_LOG_PAGE_SIZE),
         model: input.modelName,
       });
-      const response = await fetch(`${baseUrl}/api/v1/usage?${query.toString()}`, withExplicitProxyRequestInit(input.site.proxyUrl, {
+      const response = await fetch(`${baseUrl}/api/v1/usage?${query.toString()}`, withSiteRecordProxyRequestInit(input.site, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -412,7 +413,7 @@ async function fetchSelfLogPayload(baseUrl: string, token: string, input: ProxyU
       }
     }
 
-    const response = await fetch(url, withExplicitProxyRequestInit(input.site.proxyUrl, {
+    const response = await fetch(url, withSiteRecordProxyRequestInit(input.site, {
       method: 'GET',
       headers,
       signal: controller.signal,
