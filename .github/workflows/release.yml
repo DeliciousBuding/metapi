@@ -131,7 +131,7 @@ jobs:
           if ($env:WIN_CSC_KEY_PASSWORD_INPUT) { $env:WIN_CSC_KEY_PASSWORD = $env:WIN_CSC_KEY_PASSWORD_INPUT }
           for ($attempt = 1; $attempt -le 2; $attempt++) {
             Write-Host "Desktop build attempt $attempt/2"
-            npm run package:desktop -- --config.npmRebuild=false
+            npm run package:desktop
             if ($LASTEXITCODE -eq 0) {
               break
             }
@@ -139,6 +139,24 @@ jobs:
               exit $LASTEXITCODE
             }
             Start-Sleep -Seconds 90
+          }
+
+      - name: Smoke test packaged native modules (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ELECTRON_RUN_AS_NODE: 1
+        run: |
+          $appRoot = Join-Path $PWD 'release\win-unpacked\resources\app'
+          $exePath = Join-Path $PWD 'release\win-unpacked\Metapi.exe'
+          Push-Location $appRoot
+          try {
+            & $exePath -e "require('./node_modules/better-sqlite3'); console.log('better-sqlite3 ok')"
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          } finally {
+            Pop-Location
           }
 
       - name: Build desktop artifacts (Linux)
@@ -155,7 +173,7 @@ jobs:
           set -euo pipefail
           for attempt in 1 2; do
             echo "Desktop build attempt ${attempt}/2"
-            if npm run package:desktop -- --config.npmRebuild=false; then
+            if npm run package:desktop; then
               break
             fi
             if [ "$attempt" -eq 2 ]; then
@@ -184,7 +202,7 @@ jobs:
           if [ -n "${APPLE_TEAM_ID_INPUT:-}" ]; then export APPLE_TEAM_ID="$APPLE_TEAM_ID_INPUT"; fi
           for attempt in 1 2; do
             echo "Desktop build attempt ${attempt}/2"
-            if npm run package:desktop -- --config.npmRebuild=false; then
+            if npm run package:desktop; then
               break
             fi
             if [ "$attempt" -eq 2 ]; then
