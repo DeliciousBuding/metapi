@@ -34,6 +34,7 @@ import {
   normalizeMissingTokenModels,
   type MissingTokenModelsByName,
 } from './helpers/routeMissingTokenHints.js';
+import { buildVisibleRouteList } from './helpers/routeListVisibility.js';
 
 type RouteSortBy = 'modelPattern' | 'channelCount';
 type RouteSortDir = 'asc' | 'desc';
@@ -705,6 +706,7 @@ export default function TokenRoutes() {
   const filterPanelPresence = useAnimatedVisibility(!filterCollapsed, 220);
   const manualPanelPresence = useAnimatedVisibility(showManual, 220);
   const [form, setForm] = useState({ modelPattern: '', displayName: '', displayIcon: '' });
+  const [editingRouteId, setEditingRouteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
 
@@ -849,7 +851,8 @@ export default function TokenRoutes() {
   };
 
   const exactRouteCount = useMemo(
-    () => routes.filter((route) => isExactModelPattern(route.modelPattern)).length,
+    () => buildVisibleRouteList(routes, isExactModelPattern, matchesModelPattern)
+      .filter((route) => isExactModelPattern(route.modelPattern)).length,
     [routes],
   );
 
@@ -887,28 +890,63 @@ export default function TokenRoutes() {
     && !!form.modelPattern.trim()
     && !modelPatternError;
 
+  const resetRouteForm = () => {
+    setForm({ modelPattern: '', displayName: '', displayIcon: '' });
+    setEditingRouteId(null);
+  };
+
   const handleAddRoute = async () => {
     if (!form.modelPattern.trim()) return;
     if (modelPatternError) {
       toast.error(modelPatternError);
       return;
     }
+
+    const trimmedModelPattern = form.modelPattern.trim();
+    const trimmedDisplayName = form.displayName.trim() ? form.displayName.trim() : undefined;
+    const trimmedDisplayIcon = form.displayIcon.trim() ? form.displayIcon.trim() : undefined;
     setSaving(true);
     try {
-      await api.addRoute({
-        modelPattern: form.modelPattern.trim(),
-        displayName: form.displayName.trim() ? form.displayName.trim() : undefined,
-        displayIcon: form.displayIcon.trim() ? form.displayIcon.trim() : undefined,
-      });
+      if (editingRouteId) {
+        const currentRoute = routes.find((route) => route.id === editingRouteId) || null;
+        const modelPatternChanged = !!currentRoute && currentRoute.modelPattern !== trimmedModelPattern;
+        await api.updateRoute(editingRouteId, {
+          modelPattern: trimmedModelPattern,
+          displayName: trimmedDisplayName,
+          displayIcon: trimmedDisplayIcon,
+        });
+        toast.success(modelPatternChanged ? tr('群组已更新并重新匹配通道') : tr('群组已更新'));
+      } else {
+        await api.addRoute({
+          modelPattern: trimmedModelPattern,
+          displayName: trimmedDisplayName,
+          displayIcon: trimmedDisplayIcon,
+        });
+        toast.success(tr('群组已创建'));
+      }
       setShowManual(false);
-      setForm({ modelPattern: '', displayName: '', displayIcon: '' });
-      toast.success(tr('群组已创建'));
+      resetRouteForm();
       await load();
     } catch (e: any) {
-      toast.error(e.message || tr('创建群组失败'));
+      toast.error(e.message || (editingRouteId ? tr('更新群组失败') : tr('创建群组失败')));
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleEditRoute = (route: RouteRow) => {
+    setEditingRouteId(route.id);
+    setForm({
+      modelPattern: route.modelPattern || '',
+      displayName: route.displayName || '',
+      displayIcon: route.displayIcon || '',
+    });
+    setShowManual(true);
+  };
+
+  const handleCancelEditRoute = () => {
+    resetRouteForm();
+    setShowManual(false);
   };
 
   const handleDeleteRoute = async (routeId: number) => {
@@ -945,11 +983,16 @@ export default function TokenRoutes() {
     return next;
   }, [routes]);
 
+  const listVisibleRoutes = useMemo(
+    () => buildVisibleRouteList(routes, isExactModelPattern, matchesModelPattern),
+    [routes],
+  );
+
   const brandList = useMemo(() => {
     const grouped = new Map<string, { count: number; brand: BrandInfo }>();
     let otherCount = 0;
 
-    for (const route of routes) {
+    for (const route of listVisibleRoutes) {
       const brand = routeBrandById.get(route.id) || null;
       if (!brand) {
         otherCount++;
@@ -971,12 +1014,12 @@ export default function TokenRoutes() {
       }),
       otherCount,
     };
-  }, [routes, routeBrandById]);
+  }, [listVisibleRoutes, routeBrandById]);
 
   const siteList = useMemo(() => {
     const grouped = new Map<string, { count: number; siteId: number }>();
 
-    for (const route of routes) {
+    for (const route of listVisibleRoutes) {
       const seenSites = new Set<string>();
       for (const channel of route.channels || []) {
         const siteName = channel.site?.name;
@@ -997,7 +1040,7 @@ export default function TokenRoutes() {
       if (a[1].count === b[1].count) return a[0].localeCompare(b[0]);
       return b[1].count - a[1].count;
     });
-  }, [routes]);
+  }, [listVisibleRoutes]);
 
   const routeEndpointTypesByRouteId = useMemo(() => {
     const index: Record<number, Set<string>> = {};
@@ -1031,7 +1074,7 @@ export default function TokenRoutes() {
 
   const endpointTypeList = useMemo(() => {
     const grouped = new Map<string, number>();
-    for (const route of routes) {
+    for (const route of listVisibleRoutes) {
       const endpointTypes = routeEndpointTypesByRouteId[route.id] || new Set<string>();
       for (const endpointType of endpointTypes) {
         grouped.set(endpointType, (grouped.get(endpointType) || 0) + 1);
@@ -1041,7 +1084,7 @@ export default function TokenRoutes() {
       if (a[1] === b[1]) return a[0].localeCompare(b[0], undefined, { sensitivity: 'base' });
       return b[1] - a[1];
     });
-  }, [routes, routeEndpointTypesByRouteId]);
+  }, [listVisibleRoutes, routeEndpointTypesByRouteId]);
 
   const routeBrandIconCandidates = useMemo(() => {
     const byIcon = new Map<string, BrandInfo>();
@@ -1078,7 +1121,7 @@ export default function TokenRoutes() {
   const routeIconSelectValue = routeIconOptionValues.has(form.displayIcon) ? form.displayIcon : '';
 
   const groupRouteList = useMemo(() => (
-    routes
+    listVisibleRoutes
       .filter((route) => !isExactModelPattern(route.modelPattern))
       .map((route) => ({
         id: route.id,
@@ -1092,15 +1135,15 @@ export default function TokenRoutes() {
         if (a.channelCount === b.channelCount) return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
         return b.channelCount - a.channelCount;
       })
-  ), [routes, routeBrandById]);
+  ), [listVisibleRoutes, routeBrandById]);
 
   const activeGroupRoute = useMemo(() => {
     if (typeof activeGroupFilter !== 'number') return null;
-    return routes.find((route) => route.id === activeGroupFilter) || null;
-  }, [activeGroupFilter, routes]);
+    return listVisibleRoutes.find((route) => route.id === activeGroupFilter) || null;
+  }, [activeGroupFilter, listVisibleRoutes]);
 
   const sortedRoutes = useMemo(() => (
-    [...routes].sort((a, b) => {
+    [...listVisibleRoutes].sort((a, b) => {
       if (sortBy === 'channelCount') {
         const countCmp = (a.channels?.length ?? 0) - (b.channels?.length ?? 0);
         if (countCmp !== 0) return sortDir === 'asc' ? countCmp : -countCmp;
@@ -1109,7 +1152,7 @@ export default function TokenRoutes() {
       const nameCmp = a.modelPattern.localeCompare(b.modelPattern, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? nameCmp : -nameCmp;
     })
-  ), [routes, sortBy, sortDir]);
+  ), [listVisibleRoutes, sortBy, sortDir]);
 
   const filteredRoutes = useMemo(() => {
     let list = sortedRoutes;
@@ -1618,11 +1661,21 @@ export default function TokenRoutes() {
             </button>
 
             <button
-              onClick={() => setShowManual((v) => !v)}
+              onClick={() => {
+                if (showManual) {
+                  setShowManual(false);
+                  resetRouteForm();
+                  return;
+                }
+                setShowManual(true);
+                resetRouteForm();
+              }}
               className="btn btn-ghost"
               style={{ border: '1px solid var(--color-border)', padding: '8px 14px' }}
             >
-              {showManual ? tr('收起群组创建') : tr('新建群组')}
+              {editingRouteId
+                ? tr('取消编辑')
+                : (showManual ? tr('收起群组创建') : tr('新建群组'))}
             </button>
           </div>
         </div>
@@ -1681,7 +1734,9 @@ export default function TokenRoutes() {
           {manualPanelPresence.shouldRender && (
             <div className={`card panel-presence ${manualPanelPresence.isVisible ? '' : 'is-closing'}`.trim()} style={{ padding: 20, marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 10 }}>
-                {tr('用于创建群组路由（聚合多个上游模型为一个下游模型名，即模型重定向）；自动路由仍会保持开启。')}
+                {editingRouteId
+                  ? tr('编辑群组路由名称、图标和模型匹配规则；若修改正则，将按当前可用模型重新匹配自动通道。')
+                  : tr('用于创建群组路由（聚合多个上游模型为一个下游模型名，即模型重定向）；自动路由仍会保持开启。')}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: 10 }}>
@@ -1783,24 +1838,35 @@ export default function TokenRoutes() {
                   </div>
                 )}
 
-                <button
-                  onClick={handleAddRoute}
-                  disabled={!canSaveRoute}
-                  className="btn btn-success"
-                  style={{ alignSelf: 'flex-start' }}
-                >
-                  {saving ? (
-                    <>
-                      <span
-                        className="spinner spinner-sm"
-                        style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
-                      />{' '}
-                      保存中...
-                    </>
-                  ) : (
-                    tr('创建群组')
-                  )}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <button
+                    onClick={handleAddRoute}
+                    disabled={!canSaveRoute}
+                    className="btn btn-success"
+                    style={{ alignSelf: 'flex-start' }}
+                  >
+                    {saving ? (
+                      <>
+                        <span
+                          className="spinner spinner-sm"
+                          style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
+                        />{' '}
+                        保存中...
+                      </>
+                    ) : (
+                      tr(editingRouteId ? '保存群组' : '创建群组')
+                    )}
+                  </button>
+                  {editingRouteId ? (
+                    <button
+                      onClick={handleCancelEditRoute}
+                      className="btn btn-ghost"
+                      style={{ alignSelf: 'flex-start', border: '1px solid var(--color-border)' }}
+                    >
+                      {tr('取消编辑')}
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </div>
           )}
@@ -1985,12 +2051,22 @@ export default function TokenRoutes() {
                       ) : null}
                     </div>
 
-                    <button
-                      onClick={() => handleDeleteRoute(route.id)}
-                      className="btn btn-link btn-link-danger"
-                    >
-                      {tr('删除路由')}
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {!exactRoute ? (
+                        <button
+                          onClick={() => handleEditRoute(route)}
+                          className="btn btn-link"
+                        >
+                          {tr('编辑群组')}
+                        </button>
+                      ) : null}
+                      <button
+                        onClick={() => handleDeleteRoute(route.id)}
+                        className="btn btn-link btn-link-danger"
+                      >
+                        {tr('删除路由')}
+                      </button>
+                    </div>
                   </div>
 
                   {!exactRoute && (

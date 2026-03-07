@@ -1,5 +1,9 @@
-﻿import { describe, expect, it } from 'vitest';
-import { maskConnectionString, normalizeMigrationInput } from './databaseMigrationService.js';
+import { describe, expect, it } from 'vitest';
+import {
+  __databaseMigrationServiceTestUtils,
+  maskConnectionString,
+  normalizeMigrationInput,
+} from './databaseMigrationService.js';
 
 describe('databaseMigrationService', () => {
   it('accepts postgres migration input with normalized url', () => {
@@ -96,5 +100,69 @@ describe('databaseMigrationService', () => {
     });
     expect(normalized.ssl).toBe(false);
   });
-});
 
+  it.each(['postgres', 'mysql', 'sqlite'] as const)('creates or patches sites schema with use_system_proxy for %s', async (dialect) => {
+    const executedSql: string[] = [];
+    await __databaseMigrationServiceTestUtils.ensureSchema({
+      dialect,
+      begin: async () => {},
+      commit: async () => {},
+      rollback: async () => {},
+      execute: async (sqlText) => {
+        executedSql.push(sqlText);
+        return [];
+      },
+      queryScalar: async (sqlText, params = []) => {
+        if (sqlText.includes('sqlite_master') || sqlText.includes('information_schema.tables')) {
+          return 1;
+        }
+        if (sqlText.includes('pragma_table_info') || sqlText.includes('information_schema.columns')) {
+          const columnName = String(params[1] ?? sqlText.match(/name = '([^']+)'/)?.[1] ?? '');
+          return columnName === 'use_system_proxy' ? 0 : 1;
+        }
+        return 0;
+      },
+      close: async () => {},
+    });
+
+    const useSystemProxySql = executedSql.find((sqlText) => sqlText.includes('use_system_proxy'));
+
+    expect(useSystemProxySql).toContain('use_system_proxy');
+  });
+
+  it('includes useSystemProxy when building site migration statements', () => {
+    const statements = __databaseMigrationServiceTestUtils.buildStatements({
+      version: 'test',
+      timestamp: Date.now(),
+      accounts: {
+        sites: [{
+          id: 1,
+          name: 'demo',
+          url: 'https://example.com',
+          platform: 'openai',
+          useSystemProxy: true,
+          status: 'active',
+        }],
+        accounts: [],
+        accountTokens: [],
+        checkinLogs: [],
+        modelAvailability: [],
+        tokenModelAvailability: [],
+        tokenRoutes: [],
+        routeChannels: [],
+        proxyLogs: [],
+        downstreamApiKeys: [],
+        events: [],
+      },
+      preferences: {
+        settings: [],
+      },
+    });
+
+    const siteStatement = statements.find((statement) => statement.table === 'sites');
+    const useSystemProxyIndex = siteStatement?.columns.indexOf('use_system_proxy') ?? -1;
+
+    expect(useSystemProxyIndex).toBeGreaterThanOrEqual(0);
+    expect(siteStatement?.values[useSystemProxyIndex]).toBe(true);
+  });
+});

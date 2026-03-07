@@ -4,6 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { detectSite } from '../../services/siteDetector.js';
 import { invalidateSiteProxyCache } from '../../services/siteProxy.js';
 import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
+import { invalidateTokenRouterCache } from '../../services/tokenRouter.js';
 
 function normalizeSiteStatus(input: unknown): 'active' | 'disabled' | null {
   if (input === undefined || input === null) return null;
@@ -74,6 +75,11 @@ function normalizeOptionalExternalCheckinUrl(input: unknown): {
 }
 
 export async function sitesRoutes(app: FastifyInstance) {
+  function invalidateSiteCaches() {
+    invalidateSiteProxyCache();
+    invalidateTokenRouterCache();
+  }
+
   async function applySiteStatusSideEffects(
     siteId: number,
     existingSiteName: string,
@@ -216,7 +222,7 @@ export async function sitesRoutes(app: FastifyInstance) {
     if (!result) {
       return reply.code(500).send({ error: 'Create site failed' });
     }
-    invalidateSiteProxyCache();
+    invalidateSiteCaches();
     return result;
   });
 
@@ -280,11 +286,12 @@ export async function sitesRoutes(app: FastifyInstance) {
     if (body.globalWeight !== undefined) updates.globalWeight = normalizedGlobalWeight;
     updates.updatedAt = new Date().toISOString();
     await db.update(schema.sites).set(updates).where(eq(schema.sites.id, id)).run();
-    invalidateSiteProxyCache();
 
     if (body.status !== undefined && normalizedStatus) {
       await applySiteStatusSideEffects(id, existingSite.name, normalizedStatus);
     }
+
+    invalidateSiteCaches();
 
     return await db.select().from(schema.sites).where(eq(schema.sites.id, id)).get();
   });
@@ -293,7 +300,7 @@ export async function sitesRoutes(app: FastifyInstance) {
   app.delete<{ Params: { id: string } }>('/api/sites/:id', async (request) => {
     const id = parseInt(request.params.id);
     await db.delete(schema.sites).where(eq(schema.sites.id, id)).run();
-    invalidateSiteProxyCache();
+    invalidateSiteCaches();
     return { success: true };
   });
 
@@ -344,7 +351,7 @@ export async function sitesRoutes(app: FastifyInstance) {
       }
     }
 
-    invalidateSiteProxyCache();
+    invalidateSiteCaches();
     return {
       success: true,
       successIds,

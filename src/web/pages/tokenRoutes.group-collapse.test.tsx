@@ -10,6 +10,8 @@ const { apiMock } = vi.hoisted(() => ({
     getModelTokenCandidates: vi.fn(),
     getRouteDecisionsBatch: vi.fn(),
     getRouteWideDecisionsBatch: vi.fn(),
+    updateRoute: vi.fn(),
+    addRoute: vi.fn(),
   },
 }));
 
@@ -40,6 +42,14 @@ function findButtonByText(root: ReactTestInstance, text: string): ReactTestInsta
   ));
 }
 
+function findInputByPlaceholder(root: ReactTestInstance, placeholderText: string): ReactTestInstance {
+  return root.find((node) => (
+    node.type === 'input'
+    && typeof node.props.placeholder === 'string'
+    && node.props.placeholder.includes(placeholderText)
+  ));
+}
+
 async function flushMicrotasks() {
   await act(async () => {
     await Promise.resolve();
@@ -53,6 +63,8 @@ describe('TokenRoutes grouped source models', () => {
     apiMock.getModelTokenCandidates.mockResolvedValue({ models: {} });
     apiMock.getRouteDecisionsBatch.mockResolvedValue({ decisions: {} });
     apiMock.getRouteWideDecisionsBatch.mockResolvedValue({ decisions: {} });
+    apiMock.updateRoute.mockResolvedValue({});
+    apiMock.addRoute.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -360,6 +372,210 @@ describe('TokenRoutes grouped source models', () => {
       const text = collectText(root.root);
       expect(text).toContain('接口能力');
       expect(text).toContain('暂无接口能力数据');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('hides exact routes covered by a group route from the main route list', async () => {
+    apiMock.getRoutes.mockResolvedValue([
+      {
+        id: 1,
+        modelPattern: 'minimax-m2.1',
+        displayName: 'minimax-m2.1',
+        enabled: true,
+        channels: [],
+      },
+      {
+        id: 2,
+        modelPattern: 'minimaxai/minimax-m2.1',
+        displayName: 'minimaxai/minimax-m2.1',
+        enabled: true,
+        channels: [],
+      },
+      {
+        id: 3,
+        modelPattern: 're:^(minimax-m2\\.1|minimaxai/minimax-m2\\.1)$',
+        displayName: 'minimax2.1',
+        enabled: true,
+        channels: [],
+      },
+    ]);
+
+    let root: ReturnType<typeof create> | null = null;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/routes']}>
+            <ToastProvider>
+              <TokenRoutes />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const normalizedText = collectText(root.root).replace(/\s+/g, '');
+      expect(normalizedText).toContain('共1条路由');
+      expect(normalizedText).not.toContain('共3条路由');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('enters edit mode and seeds the group form with the current route values', async () => {
+    apiMock.getRoutes.mockResolvedValue([
+      {
+        id: 31,
+        modelPattern: 're:^claude-(opus|sonnet)-4-6$',
+        displayName: 'claude-4-6-group',
+        displayIcon: 'anthropic',
+        enabled: true,
+        channels: [],
+      },
+    ]);
+
+    let root: ReturnType<typeof create> | null = null;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/routes']}>
+            <ToastProvider>
+              <TokenRoutes />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const editButton = findButtonByText(root.root, '编辑群组');
+      await act(async () => {
+        editButton.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(findInputByPlaceholder(root.root, '群组显示名').props.value).toBe('claude-4-6-group');
+      expect(findInputByPlaceholder(root.root, '模型匹配').props.value).toBe('re:^claude-(opus|sonnet)-4-6$');
+      expect(collectText(root.root)).toContain('保存群组');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('updates route metadata from edit mode and reloads routes afterwards', async () => {
+    apiMock.getRoutes
+      .mockResolvedValueOnce([
+        {
+          id: 41,
+          modelPattern: 're:^claude-.*$',
+          displayName: 'old-group',
+          displayIcon: '',
+          enabled: true,
+          channels: [],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 41,
+          modelPattern: 're:^claude-.*$',
+          displayName: 'new-group',
+          displayIcon: '',
+          enabled: true,
+          channels: [],
+        },
+      ]);
+
+    let root: ReturnType<typeof create> | null = null;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/routes']}>
+            <ToastProvider>
+              <TokenRoutes />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      await act(async () => {
+        findButtonByText(root.root, '编辑群组').props.onClick();
+      });
+      await flushMicrotasks();
+
+      await act(async () => {
+        findInputByPlaceholder(root.root, '群组显示名').props.onChange({ target: { value: 'new-group' } });
+      });
+
+      await act(async () => {
+        findButtonByText(root.root, '保存群组').props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.updateRoute).toHaveBeenCalledWith(41, expect.objectContaining({
+        displayName: 'new-group',
+        modelPattern: 're:^claude-.*$',
+      }));
+      expect(apiMock.getRoutes).toHaveBeenCalledTimes(2);
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('reloads route data after saving an edited model pattern', async () => {
+    apiMock.getRoutes
+      .mockResolvedValueOnce([
+        {
+          id: 51,
+          modelPattern: 're:^claude-.*$',
+          displayName: 'group-a',
+          displayIcon: '',
+          enabled: true,
+          channels: [],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 51,
+          modelPattern: 're:^gemini-.*$',
+          displayName: 'group-a',
+          displayIcon: '',
+          enabled: true,
+          channels: [],
+        },
+      ]);
+
+    let root: ReturnType<typeof create> | null = null;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/routes']}>
+            <ToastProvider>
+              <TokenRoutes />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      await act(async () => {
+        findButtonByText(root.root, '编辑群组').props.onClick();
+      });
+      await flushMicrotasks();
+
+      await act(async () => {
+        findInputByPlaceholder(root.root, '模型匹配').props.onChange({ target: { value: 're:^gemini-.*$' } });
+      });
+
+      await act(async () => {
+        findButtonByText(root.root, '保存群组').props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.updateRoute).toHaveBeenCalledWith(51, expect.objectContaining({
+        modelPattern: 're:^gemini-.*$',
+      }));
+      expect(apiMock.getRoutes).toHaveBeenCalledTimes(2);
     } finally {
       root?.unmount();
     }

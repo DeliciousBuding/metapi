@@ -5,6 +5,7 @@ import { drizzle as drizzleSqliteProxy } from 'drizzle-orm/sqlite-proxy';
 import { drizzle as drizzleMysqlProxy } from 'drizzle-orm/mysql-proxy';
 import { drizzle as drizzlePgProxy } from 'drizzle-orm/pg-proxy';
 import * as schema from './schema.js';
+import { ensureSiteSchemaCompatibility, type SiteSchemaInspector } from './siteSchemaCompatibility.js';
 import { config } from '../config.js';
 import { mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
@@ -219,6 +220,73 @@ function ensureSiteGlobalWeightSchema() {
     WHERE global_weight IS NULL
       OR global_weight <= 0;
   `);
+}
+
+function createSqliteSiteSchemaInspector(): SiteSchemaInspector {
+  return {
+    dialect: 'sqlite',
+    tableExists: async (table) => tableExists(table),
+    columnExists: async (table, column) => tableColumnExists(table, column),
+    execute: async (sqlText) => {
+      requireSqliteConnection().exec(sqlText);
+    },
+  };
+}
+
+export async function ensureSiteCompatibilityColumns(): Promise<void> {
+  if (runtimeDbDialect === 'sqlite') {
+    await ensureSiteSchemaCompatibility(createSqliteSiteSchemaInspector());
+    return;
+  }
+
+  if (runtimeDbDialect === 'mysql') {
+    if (!mysqlPool) return;
+
+    await ensureSiteSchemaCompatibility({
+      dialect: 'mysql',
+      tableExists: async (table) => {
+        const [rows] = await mysqlPool!.query(
+          'SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ? LIMIT 1',
+          [table],
+        );
+        return Array.isArray(rows) && rows.length > 0;
+      },
+      columnExists: async (table, column) => {
+        const [rows] = await mysqlPool!.query(
+          'SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1',
+          [table, column],
+        );
+        return Array.isArray(rows) && rows.length > 0;
+      },
+      execute: async (sqlText) => {
+        await mysqlPool!.query(sqlText);
+      },
+    });
+    return;
+  }
+
+  if (!pgPool) return;
+
+  await ensureSiteSchemaCompatibility({
+    dialect: 'postgres',
+    tableExists: async (table) => {
+      const result = await pgPool!.query(
+        'SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1 LIMIT 1',
+        [table],
+      );
+      return Number(result.rowCount || 0) > 0;
+    },
+    columnExists: async (table, column) => {
+      const result = await pgPool!.query(
+        'SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2 LIMIT 1',
+        [table, column],
+      );
+      return Number(result.rowCount || 0) > 0;
+    },
+    execute: async (sqlText) => {
+      await pgPool!.query(sqlText);
+    },
+  });
 }
 
 function ensureRouteGroupingSchema() {

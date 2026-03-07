@@ -27,7 +27,15 @@ import { isPublicApiRoute, registerDesktopRoutes } from './desktop.js';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, normalize, resolve, sep } from 'path';
-import { db, ensureProxyLogBillingDetailsColumn, runtimeDbDialect, schema, switchRuntimeDatabase, type RuntimeDbDialect } from './db/index.js';
+import {
+  db,
+  ensureProxyLogBillingDetailsColumn,
+  ensureSiteCompatibilityColumns,
+  runtimeDbDialect,
+  schema,
+  switchRuntimeDatabase,
+  type RuntimeDbDialect,
+} from './db/index.js';
 
 let sqliteMigrationsBootstrapped = false;
 
@@ -207,6 +215,7 @@ try {
     }
   }
 
+  await ensureSiteCompatibilityColumns();
   const finalRows = await db.select().from(schema.settings).all();
   const finalMap = toSettingsMap(finalRows);
   applyRuntimeSettings(finalMap);

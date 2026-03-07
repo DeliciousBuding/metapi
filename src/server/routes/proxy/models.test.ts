@@ -209,4 +209,79 @@ describe('/v1/models route', () => {
     expect(ids).toContain('allowed-model');
     expect(ids).not.toContain('blocked-model');
   });
+
+  it('returns only selected group route alias for managed key with allowedRouteIds policy', async () => {
+    const site = await db.insert(schema.sites).values({
+      name: 'test-site',
+      url: 'https://upstream.example.com',
+      platform: 'openai',
+      status: 'active',
+    }).returning().get();
+
+    const account = await db.insert(schema.accounts).values({
+      siteId: site.id,
+      accessToken: 'account-access-token',
+      status: 'active',
+    }).returning().get();
+
+    const token = await db.insert(schema.accountTokens).values({
+      accountId: account.id,
+      name: 'default',
+      token: 'account-api-token',
+      enabled: true,
+      isDefault: true,
+    }).returning().get();
+
+    await db.insert(schema.modelAvailability).values([
+      {
+        accountId: account.id,
+        modelName: 'claude-opus-4-5',
+        available: true,
+      },
+      {
+        accountId: account.id,
+        modelName: 'claude-sonnet-4-5',
+        available: true,
+      },
+    ]).run();
+
+    const groupRoute = await db.insert(schema.tokenRoutes).values({
+      modelPattern: 're:^claude-(opus|sonnet)-4-5$',
+      displayName: 'claude-opus-4-6',
+      enabled: true,
+    }).returning().get();
+
+    await db.insert(schema.routeChannels).values({
+      routeId: groupRoute.id,
+      accountId: account.id,
+      tokenId: token.id,
+      enabled: true,
+    }).run();
+
+    await db.insert(schema.downstreamApiKeys).values({
+      name: 'managed-key',
+      key: 'sk-managed-group-only',
+      enabled: true,
+      allowedRouteIds: JSON.stringify([groupRoute.id]),
+    }).run();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/models',
+      headers: {
+        authorization: 'Bearer sk-managed-group-only',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as {
+      object: 'list';
+      data: Array<{ id: string }>;
+    };
+
+    const ids = body.data.map((item) => item.id);
+    expect(ids).toContain('claude-opus-4-6');
+    expect(ids).not.toContain('claude-opus-4-5');
+    expect(ids).not.toContain('claude-sonnet-4-5');
+  });
 });

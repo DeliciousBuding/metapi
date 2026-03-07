@@ -195,6 +195,13 @@ type ExplainSelectionOptions = {
   downstreamPolicy?: DownstreamRoutingPolicy;
 };
 
+type CandidateEligibilityOptions = {
+  requestedModel: string;
+  bypassSourceModelCheck?: boolean;
+  excludeChannelIds?: number[];
+  nowIso?: string;
+};
+
 type CostSignal = {
   unitCost: number;
   source: 'observed' | 'configured' | 'catalog' | 'fallback';
@@ -364,6 +371,10 @@ function resolveEffectiveUnitCost(candidate: RouteChannelCandidate, modelName: s
   };
 }
 
+function isExplicitTokenChannel(candidate: RouteChannelCandidate): boolean {
+  return typeof candidate.channel.tokenId === 'number' && candidate.channel.tokenId > 0;
+}
+
 export class TokenRouter {
   /**
    * Find matching route and select a channel for the given model.
@@ -379,17 +390,15 @@ export class TokenRouter {
     const requestedByDisplayName = isRouteDisplayNameMatch(requestedModel, match.route.displayName);
     const bypassSourceModelCheck = requestedByDisplayName;
 
-    // Filter channels: enabled, not in cooldown, account/site active with token
     const nowIso = new Date().toISOString();
     const nowMs = Date.now();
-    const available = match.channels.filter((c) =>
-      (bypassSourceModelCheck || channelSupportsRequestedModel(c.channel.sourceModel, requestedModel)) &&
-      c.channel.enabled &&
-      c.account.status === 'active' &&
-      !isSiteDisabled(c.site.status) &&
-      !!this.resolveChannelTokenValue(c) &&
-      (!c.channel.cooldownUntil || c.channel.cooldownUntil <= nowIso),
-    );
+    const available = match.channels.filter((candidate) => (
+      this.getCandidateEligibilityReasons(candidate, {
+        requestedModel,
+        bypassSourceModelCheck,
+        nowIso,
+      }).length === 0
+    ));
 
     if (available.length === 0) return null;
 
@@ -459,15 +468,14 @@ export class TokenRouter {
 
     const nowIso = new Date().toISOString();
     const nowMs = Date.now();
-    const available = match.channels.filter((c) =>
-      (bypassSourceModelCheck || channelSupportsRequestedModel(c.channel.sourceModel, requestedModel)) &&
-      c.channel.enabled &&
-      c.account.status === 'active' &&
-      !isSiteDisabled(c.site.status) &&
-      !!this.resolveChannelTokenValue(c) &&
-      (!c.channel.cooldownUntil || c.channel.cooldownUntil <= nowIso) &&
-      !excludeChannelIds.includes(c.channel.id),
-    );
+    const available = match.channels.filter((candidate) => (
+      this.getCandidateEligibilityReasons(candidate, {
+        requestedModel,
+        bypassSourceModelCheck,
+        excludeChannelIds,
+        nowIso,
+      }).length === 0
+    ));
 
     if (available.length === 0) return null;
 
@@ -578,17 +586,12 @@ export class TokenRouter {
     const candidateMap = new Map<number, RouteDecisionCandidate>();
 
     for (const row of match.channels) {
-      const reasonParts: string[] = [];
-      if (!bypassSourceModelCheck && !channelSupportsRequestedModel(row.channel.sourceModel, requestedModel)) {
-        reasonParts.push(`来源模型不匹配=${row.channel.sourceModel || ''}`);
-      }
-      if (!row.channel.enabled) reasonParts.push('通道禁用');
-      if (row.account.status !== 'active') reasonParts.push(`账号状态=${row.account.status}`);
-      if (isSiteDisabled(row.site.status)) reasonParts.push(`站点状态=${row.site.status || 'disabled'}`);
-      if (excludeChannelIds.includes(row.channel.id)) reasonParts.push('当前请求已尝试');
-      const tokenValue = this.resolveChannelTokenValue(row);
-      if (!tokenValue) reasonParts.push('令牌不可用');
-      if (row.channel.cooldownUntil && row.channel.cooldownUntil > nowIso) reasonParts.push('冷却中');
+      const reasonParts = this.getCandidateEligibilityReasons(row, {
+        requestedModel,
+        bypassSourceModelCheck,
+        excludeChannelIds,
+        nowIso,
+      });
 
       const recentlyFailed = isChannelRecentlyFailed(row.channel, nowMs, RECENT_FAILURE_AVOID_SEC);
       const eligible = reasonParts.length === 0;
@@ -836,6 +839,47 @@ export class TokenRouter {
 
     const fallback = candidate.account.apiToken?.trim();
     return fallback || null;
+  }
+
+  private getCandidateEligibilityReasons(
+    candidate: RouteChannelCandidate,
+    options: CandidateEligibilityOptions,
+  ): string[] {
+    const reasonParts: string[] = [];
+    const bypassSourceModelCheck = options.bypassSourceModelCheck ?? false;
+    const excludeChannelIds = options.excludeChannelIds ?? [];
+    const nowIso = options.nowIso ?? new Date().toISOString();
+
+    if (!bypassSourceModelCheck && !channelSupportsRequestedModel(candidate.channel.sourceModel, options.requestedModel)) {
+      reasonParts.push(`来源模型不匹配=${candidate.channel.sourceModel || ''}`);
+    }
+
+    if (!candidate.channel.enabled) reasonParts.push('通道禁用');
+
+    if (isExplicitTokenChannel(candidate)) {
+      if (candidate.account.status === 'disabled') {
+        reasonParts.push(`账号状态=${candidate.account.status}`);
+      }
+    } else if (candidate.account.status !== 'active') {
+      reasonParts.push(`账号状态=${candidate.account.status}`);
+    }
+
+    if (isSiteDisabled(candidate.site.status)) {
+      reasonParts.push(`站点状态=${candidate.site.status || 'disabled'}`);
+    }
+
+    if (excludeChannelIds.includes(candidate.channel.id)) {
+      reasonParts.push('当前请求已尝试');
+    }
+
+    const tokenValue = this.resolveChannelTokenValue(candidate);
+    if (!tokenValue) reasonParts.push('令牌不可用');
+
+    if (candidate.channel.cooldownUntil && candidate.channel.cooldownUntil > nowIso) {
+      reasonParts.push('冷却中');
+    }
+
+    return reasonParts;
   }
 
   private weightedRandomSelect(

@@ -169,6 +169,30 @@ async function populateRouteChannelsByModelPattern(routeId: number, modelPattern
   return created;
 }
 
+async function rebuildAutomaticRouteChannelsByModelPattern(routeId: number, modelPattern: string): Promise<{
+  removedChannels: number;
+  createdChannels: number;
+}> {
+  const removableChannels = await db.select().from(schema.routeChannels)
+    .where(
+      and(
+        eq(schema.routeChannels.routeId, routeId),
+        eq(schema.routeChannels.manualOverride, false),
+      ),
+    )
+    .all();
+
+  for (const channel of removableChannels) {
+    await db.delete(schema.routeChannels).where(eq(schema.routeChannels.id, channel.id)).run();
+  }
+
+  const createdChannels = await populateRouteChannelsByModelPattern(routeId, modelPattern);
+  return {
+    removedChannels: removableChannels.length,
+    createdChannels,
+  };
+}
+
 type BatchChannelPriorityUpdate = {
   id: number;
   priority: number;
@@ -445,19 +469,32 @@ export async function tokensRoutes(app: FastifyInstance) {
   });
 
   // Update a route
-  app.put<{ Params: { id: string }; Body: any }>('/api/routes/:id', async (request) => {
+  app.put<{ Params: { id: string }; Body: any }>('/api/routes/:id', async (request, reply) => {
     const id = parseInt(request.params.id, 10);
     const body = request.body as Record<string, unknown>;
+    const existingRoute = await db.select().from(schema.tokenRoutes).where(eq(schema.tokenRoutes.id, id)).get();
+    if (!existingRoute) {
+      return reply.code(404).send({ success: false, message: '路由不存在' });
+    }
+
     const updates: Record<string, unknown> = {};
+    let nextModelPattern = existingRoute.modelPattern;
 
     if (body.displayName !== undefined) updates.displayName = body.displayName;
     if (body.displayIcon !== undefined) updates.displayIcon = body.displayIcon;
-    if (body.modelPattern !== undefined) updates.modelPattern = body.modelPattern;
+    if (body.modelPattern !== undefined) {
+      nextModelPattern = String(body.modelPattern);
+      updates.modelPattern = nextModelPattern;
+    }
     if (body.modelMapping !== undefined) updates.modelMapping = body.modelMapping;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
     updates.updatedAt = new Date().toISOString();
 
     await db.update(schema.tokenRoutes).set(updates).where(eq(schema.tokenRoutes.id, id)).run();
+    const modelPatternChanged = body.modelPattern !== undefined && nextModelPattern !== existingRoute.modelPattern;
+    if (modelPatternChanged) {
+      await rebuildAutomaticRouteChannelsByModelPattern(id, nextModelPattern);
+    }
     invalidateTokenRouterCache();
     return await db.select().from(schema.tokenRoutes).where(eq(schema.tokenRoutes.id, id)).get();
   });
