@@ -586,7 +586,7 @@ describe('convertOpenAiBodyToAnthropicMessagesBody', () => {
     );
 
     expect(result.error).toBeUndefined();
-    expect(result.value?.claudeOriginalBody).toEqual({
+    expect(result.value?.parsed.claudeOriginalBody).toEqual({
       model: 'gpt-5',
       max_tokens: 512,
       tools: [
@@ -623,7 +623,7 @@ describe('convertOpenAiToolChoiceToAnthropic', () => {
       max_tokens: 512,
       messages: [{ role: 'user', content: 'hello' }],
       tool_choice: { type: 'tool', tool: { name: 'lookup' } },
-    }).value?.claudeOriginalBody?.tool_choice).toEqual({
+    }).value?.parsed.claudeOriginalBody?.tool_choice).toEqual({
       type: 'tool',
       name: 'lookup',
     });
@@ -633,7 +633,7 @@ describe('convertOpenAiToolChoiceToAnthropic', () => {
       max_tokens: 512,
       messages: [{ role: 'user', content: 'hello' }],
       tool_choice: { type: 'none', name: 'should-disappear' },
-    }).value?.claudeOriginalBody?.tool_choice).toEqual({
+    }).value?.parsed.claudeOriginalBody?.tool_choice).toEqual({
       type: 'none',
     });
   });
