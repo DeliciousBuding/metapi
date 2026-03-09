@@ -76,6 +76,29 @@ describe('filterRecentlyFailedCandidates', () => {
     expect(result.map((c) => c.id).sort()).toEqual(['a', 'b']);
   });
 
+  it('keeps candidates unchanged when avoidSec is omitted', () => {
+    const nowMs = Date.now();
+    const candidates: Candidate[] = [
+      {
+        id: 'recent-failure',
+        channel: {
+          failCount: 3,
+          lastFailAt: new Date(nowMs - 5 * 1000).toISOString(),
+        },
+      },
+      {
+        id: 'healthy',
+        channel: {
+          failCount: 0,
+          lastFailAt: null,
+        },
+      },
+    ];
+
+    const result = filterRecentlyFailedCandidates(candidates, nowMs);
+    expect(result).toEqual(candidates);
+  });
+
   it('does not penalize stale failures outside the avoidance window', () => {
     const nowMs = Date.now();
     const candidates: Candidate[] = [

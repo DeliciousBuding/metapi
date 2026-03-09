@@ -168,7 +168,7 @@ export function filterRecentlyFailedCandidates<T extends { channel: FailureAware
   avoidSec?: number,
 ): T[] {
   if (candidates.length <= 1) return candidates;
-  if (avoidSec <= 0) return candidates;
+  if (avoidSec == null || avoidSec <= 0) return candidates;
 
   const healthy = candidates.filter((candidate) => !isChannelRecentlyFailed(candidate.channel, nowMs, avoidSec));
   // If all channels failed recently, keep them all and let weight/random decide.
