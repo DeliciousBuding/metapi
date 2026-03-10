@@ -379,6 +379,17 @@ function parseBatchRouteWideDecisionRouteIds(
 }
 
 export async function tokensRoutes(app: FastifyInstance) {
+  // List routes with basic info only (lightweight for selectors)
+  app.get('/api/routes/lite', async () => {
+    return await db.select({
+      id: schema.tokenRoutes.id,
+      modelPattern: schema.tokenRoutes.modelPattern,
+      displayName: schema.tokenRoutes.displayName,
+      displayIcon: schema.tokenRoutes.displayIcon,
+      enabled: schema.tokenRoutes.enabled,
+    }).from(schema.tokenRoutes).all();
+  });
+
   // List all routes
   app.get('/api/routes', async () => {
     const routes = await db.select().from(schema.tokenRoutes).all();

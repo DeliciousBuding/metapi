@@ -273,6 +273,7 @@ export const api = {
 
   // Routes
   getRoutes: () => request('/api/routes'),
+  getRoutesLite: () => request('/api/routes/lite'),
   addRoute: (data: any) => request('/api/routes', { method: 'POST', body: JSON.stringify(data) }),
   updateRoute: (id: number, data: any) => request(`/api/routes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRoute: (id: number) => request(`/api/routes/${id}`, { method: 'DELETE' }),
