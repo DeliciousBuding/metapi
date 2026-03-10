@@ -136,9 +136,17 @@ export async function responsesProxyRoute(app: FastifyInstance) {
     const requestEnvelope = parsedRequestEnvelope.value!;
     const requestedModel = requestEnvelope.model;
     const isStream = requestEnvelope.stream;
+    const isCompactRequest = downstreamPath === '/v1/responses/compact';
+    if (isCompactRequest && isStream) {
+      return reply.code(400).send({
+        error: {
+          message: 'stream is not supported on /v1/responses/compact',
+          type: 'invalid_request_error',
+        },
+      });
+    }
     if (!await ensureModelAllowedForDownstreamKey(request, reply, requestedModel)) return;
     const downstreamPolicy = getDownstreamRoutingPolicy(request);
-    const isCompactRequest = downstreamPath === '/v1/responses/compact';
     const excludeChannelIds: number[] = [];
     let retryCount = 0;
 
@@ -333,6 +341,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
         const successfulUpstreamPath = endpointResult.upstreamPath;
 
         if (isStream) {
+          reply.hijack();
           reply.raw.statusCode = 200;
           reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
           reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -418,6 +427,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
           upstreamPayload: upstreamData,
           normalized,
           usage: parsedUsage,
+          serializationMode: isCompactRequest ? 'compact' : 'response',
         });
         const resolvedUsage = await resolveProxyUsageWithSelfLogFallback({
           site: selected.site,
