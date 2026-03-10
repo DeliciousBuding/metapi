@@ -85,8 +85,6 @@ function extractTextPart(value: unknown): string {
   if (typeof value.text === 'string') return value.text;
   if (typeof value.output_text === 'string') return value.output_text;
   if (typeof value.content === 'string') return value.content;
-  if (typeof value.reasoning_content === 'string') return value.reasoning_content;
-  if (typeof value.reasoning === 'string') return value.reasoning;
 
   if (Array.isArray(value.content)) {
     return value.content.map((item) => extractTextPart(item)).join('');
@@ -302,6 +300,11 @@ export function extractChatChoiceEvents(payload: unknown): OpenAiChatChoiceDelta
     if (!choiceRecord) continue;
     const delta = asRecord(choiceRecord.delta) ?? {};
     const parsed = extractTextAndReasoning(delta.content ?? delta);
+    const reasoningDelta = typeof delta.reasoning_content === 'string'
+      ? delta.reasoning_content
+      : typeof delta.reasoning === 'string'
+        ? delta.reasoning
+        : parsed.reasoning;
     const toolCallDeltas = collectToolCallDeltas(delta.tool_calls);
     const annotations = extractChoiceAnnotations(choiceRecord);
     const citations = extractChoiceCitations(choiceRecord, sharedCitations);
@@ -313,8 +316,8 @@ export function extractChatChoiceEvents(payload: unknown): OpenAiChatChoiceDelta
       index: choiceIndex,
       ...(delta.role === 'assistant' ? { role: 'assistant' as const } : {}),
       ...(parsed.content ? { contentDelta: parsed.content } : {}),
-      ...((typeof delta.reasoning_content === 'string' ? delta.reasoning_content : parsed.reasoning)
-        ? { reasoningDelta: (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : parsed.reasoning) }
+      ...(reasoningDelta
+        ? { reasoningDelta }
         : {}),
       ...(toolCallDeltas ? { toolCallDeltas } : {}),
       finishReason: typeof choiceRecord.finish_reason === 'string' ? choiceRecord.finish_reason : null,
