@@ -395,7 +395,7 @@ export default function Sites() {
         </div>
       </div>
 
-      {selectedSiteIds.length > 0 && (
+      {!isMobile && selectedSiteIds.length > 0 && (
         <div className="card" style={{ padding: 12, marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>已选 {selectedSiteIds.length} 项</span>
           <button
@@ -424,6 +424,40 @@ export default function Sites() {
           <button onClick={() => runBatchAction('delete')} disabled={batchActionLoading} className="btn btn-link btn-link-danger">
             批量删除
           </button>
+        </div>
+      )}
+
+      {isMobile && selectedSiteIds.length > 0 && (
+        <div className="mobile-actions-bar">
+          <span className="mobile-actions-info">已选 {selectedSiteIds.length} 项</span>
+          <div className="mobile-actions-row">
+            <button
+              data-testid="sites-batch-enable-system-proxy"
+              onClick={() => runBatchAction('enableSystemProxy')}
+              disabled={batchActionLoading}
+              className="btn btn-ghost"
+              style={{ border: '1px solid var(--color-border)' }}
+            >
+              批量开启系统代理
+            </button>
+            <button
+              onClick={() => runBatchAction('disableSystemProxy')}
+              disabled={batchActionLoading}
+              className="btn btn-ghost"
+              style={{ border: '1px solid var(--color-border)' }}
+            >
+              批量关闭系统代理
+            </button>
+            <button onClick={() => runBatchAction('enable')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+              批量启用
+            </button>
+            <button onClick={() => runBatchAction('disable')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+              批量禁用
+            </button>
+            <button onClick={() => runBatchAction('delete')} disabled={batchActionLoading} className="btn btn-link btn-link-danger">
+              批量删除
+            </button>
+          </div>
         </div>
       )}
 

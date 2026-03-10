@@ -10,6 +10,7 @@ import {
 import { useToast } from '../components/Toast.js';
 import { ModelBadge } from '../components/BrandIcon.js';
 import { MobileCard, MobileField } from '../components/MobileCard.js';
+import { MobileDrawer } from '../components/MobileDrawer.js';
 import { useIsMobile } from '../components/useIsMobile.js';
 import { formatDateTimeLocal } from './helpers/checkinLogTime.js';
 import ModernSelect from '../components/ModernSelect.js';
@@ -125,6 +126,7 @@ export default function ProxyLogs() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [detailById, setDetailById] = useState<Record<number, ProxyLogDetailState>>({});
+  const [showFilters, setShowFilters] = useState(false);
   const isMobile = useIsMobile(768);
   const toast = useToast();
 
@@ -217,6 +219,35 @@ export default function ProxyLogs() {
     }
   }, [expanded, loadDetail]);
 
+  const filterControls = (
+    <>
+      <div className="pill-tabs">
+        {([
+          { key: 'all' as ProxyLogStatusFilter, label: '全部', count: summary.totalCount },
+          { key: 'success' as ProxyLogStatusFilter, label: '成功', count: summary.successCount },
+          { key: 'failed' as ProxyLogStatusFilter, label: '失败', count: summary.failedCount },
+        ]).map((tab) => (
+          <button
+            key={tab.key}
+            className={`pill-tab ${statusFilter === tab.key ? 'active' : ''}`}
+            onClick={() => {
+              setStatusFilter(tab.key);
+              setPage(1);
+            }}
+          >
+            {tab.label} <span style={{ fontVariantNumeric: 'tabular-nums', opacity: 0.7 }}>{tab.count}</span>
+          </button>
+        ))}
+      </div>
+      <div className="toolbar-search" style={{ maxWidth: 280 }}>
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="搜索模型名称..." />
+      </div>
+    </>
+  );
+
   return (
     <div className="animate-fade-in">
       <div className="page-header" style={{ marginBottom: 16 }}>
@@ -237,32 +268,29 @@ export default function ProxyLogs() {
         </button>
       </div>
 
-      <div className="toolbar" style={{ marginBottom: 12 }}>
-        <div className="pill-tabs">
-          {([
-            { key: 'all' as ProxyLogStatusFilter, label: '全部', count: summary.totalCount },
-            { key: 'success' as ProxyLogStatusFilter, label: '成功', count: summary.successCount },
-            { key: 'failed' as ProxyLogStatusFilter, label: '失败', count: summary.failedCount },
-          ]).map((tab) => (
+      {isMobile ? (
+        <>
+          <div className="mobile-filter-row">
             <button
-              key={tab.key}
-              className={`pill-tab ${statusFilter === tab.key ? 'active' : ''}`}
-              onClick={() => {
-                setStatusFilter(tab.key);
-                setPage(1);
-              }}
+              type="button"
+              className="btn btn-ghost"
+              style={{ border: '1px solid var(--color-border)' }}
+              onClick={() => setShowFilters(true)}
             >
-              {tab.label} <span style={{ fontVariantNumeric: 'tabular-nums', opacity: 0.7 }}>{tab.count}</span>
+              筛选
             </button>
-          ))}
+          </div>
+          <MobileDrawer open={showFilters} onClose={() => setShowFilters(false)}>
+            <div className="mobile-filter-panel">
+              {filterControls}
+            </div>
+          </MobileDrawer>
+        </>
+      ) : (
+        <div className="toolbar" style={{ marginBottom: 12 }}>
+          {filterControls}
         </div>
-        <div className="toolbar-search" style={{ maxWidth: 280 }}>
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="搜索模型名称..." />
-        </div>
-      </div>
+      )}
 
       <div className="card" style={{ overflowX: 'auto' }}>
         {loading ? (

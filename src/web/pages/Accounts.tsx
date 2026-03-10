@@ -795,7 +795,7 @@ export default function Accounts() {
         ))}
       </div>
 
-      {activeSegment !== 'tokens' && selectedAccountIds.length > 0 && (
+      {!isMobile && activeSegment !== 'tokens' && selectedAccountIds.length > 0 && (
         <div className="card" style={{ padding: 12, marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>已选 {selectedAccountIds.length} 项</span>
           <button data-testid="accounts-batch-refresh-balance" onClick={() => runBatchAccountAction('refreshBalance')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
@@ -810,6 +810,26 @@ export default function Accounts() {
           <button onClick={() => runBatchAccountAction('delete')} disabled={batchActionLoading} className="btn btn-link btn-link-danger">
             批量删除
           </button>
+        </div>
+      )}
+
+      {isMobile && activeSegment !== 'tokens' && selectedAccountIds.length > 0 && (
+        <div className="mobile-actions-bar">
+          <span className="mobile-actions-info">已选 {selectedAccountIds.length} 项</span>
+          <div className="mobile-actions-row">
+            <button data-testid="accounts-batch-refresh-balance" onClick={() => runBatchAccountAction('refreshBalance')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+              批量刷新余额
+            </button>
+            <button onClick={() => runBatchAccountAction('enable')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+              批量启用
+            </button>
+            <button onClick={() => runBatchAccountAction('disable')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+              批量禁用
+            </button>
+            <button onClick={() => runBatchAccountAction('delete')} disabled={batchActionLoading} className="btn btn-link btn-link-danger">
+              批量删除
+            </button>
+          </div>
         </div>
       )}
 

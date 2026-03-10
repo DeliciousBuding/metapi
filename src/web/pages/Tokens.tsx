@@ -729,7 +729,7 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
         ) : null}
       </CenteredModal>
 
-      {selectedTokenIds.length > 0 && (
+      {!isMobile && selectedTokenIds.length > 0 && (
         <div className="card" style={{ padding: 12, marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>已选 {selectedTokenIds.length} 项</span>
           <button onClick={() => runBatchTokenAction('enable')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
@@ -741,6 +741,23 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
           <button data-testid="tokens-batch-delete" onClick={() => runBatchTokenAction('delete')} disabled={batchActionLoading} className="btn btn-link btn-link-danger">
             批量删除
           </button>
+        </div>
+      )}
+
+      {isMobile && selectedTokenIds.length > 0 && (
+        <div className="mobile-actions-bar">
+          <span className="mobile-actions-info">已选 {selectedTokenIds.length} 项</span>
+          <div className="mobile-actions-row">
+            <button onClick={() => runBatchTokenAction('enable')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+              批量启用
+            </button>
+            <button onClick={() => runBatchTokenAction('disable')} disabled={batchActionLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+              批量禁用
+            </button>
+            <button data-testid="tokens-batch-delete" onClick={() => runBatchTokenAction('delete')} disabled={batchActionLoading} className="btn btn-link btn-link-danger">
+              批量删除
+            </button>
+          </div>
         </div>
       )}
 

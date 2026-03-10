@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { MobileCard, MobileField } from '../components/MobileCard.js';
+import { MobileDrawer } from '../components/MobileDrawer.js';
 import { useToast } from '../components/Toast.js';
 import { useIsMobile } from '../components/useIsMobile.js';
 import { formatCheckinLogTime } from './helpers/checkinLogTime.js';
@@ -22,6 +23,7 @@ export default function CheckinLog() {
   const [triggering, setTriggering] = useState(false);
   const [filter, setFilter] = useState<LogFilter>('all');
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
   const isMobile = useIsMobile(768);
   const toast = useToast();
 
@@ -86,6 +88,19 @@ export default function CheckinLog() {
     return reason;
   };
 
+  const filterTabs = (
+    <div className="tabs" style={{ marginBottom: 0 }}>
+      {(['all', 'success', 'failed', 'skipped'] as const).map((tab) => (
+        <button key={tab} className={`tab ${filter === tab ? 'active' : ''}`} onClick={() => setFilter(tab)}>
+          {tab === 'all' && `全部 (${logs.length})`}
+          {tab === 'success' && `成功 (${countBy('success')})`}
+          {tab === 'failed' && `失败 (${countBy('failed')})`}
+          {tab === 'skipped' && `跳过 (${countBy('skipped')})`}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="animate-fade-in">
       <div className="page-header">
@@ -106,16 +121,27 @@ export default function CheckinLog() {
         </button>
       </div>
 
-      <div className="tabs" style={{ marginBottom: 0 }}>
-        {(['all', 'success', 'failed', 'skipped'] as const).map((tab) => (
-          <button key={tab} className={`tab ${filter === tab ? 'active' : ''}`} onClick={() => setFilter(tab)}>
-            {tab === 'all' && `全部 (${logs.length})`}
-            {tab === 'success' && `成功 (${countBy('success')})`}
-            {tab === 'failed' && `失败 (${countBy('failed')})`}
-            {tab === 'skipped' && `跳过 (${countBy('skipped')})`}
-          </button>
-        ))}
-      </div>
+      {isMobile ? (
+        <>
+          <div className="mobile-filter-row">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ border: '1px solid var(--color-border)' }}
+              onClick={() => setShowFilters(true)}
+            >
+              筛选
+            </button>
+          </div>
+          <MobileDrawer open={showFilters} onClose={() => setShowFilters(false)}>
+            <div className="mobile-filter-panel">
+              {filterTabs}
+            </div>
+          </MobileDrawer>
+        </>
+      ) : (
+        filterTabs
+      )}
 
       <div className="card" style={{ overflowX: 'auto', borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
         {loading ? (
