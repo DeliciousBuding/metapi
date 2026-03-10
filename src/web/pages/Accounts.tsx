@@ -1322,6 +1322,9 @@ export default function Accounts() {
                     const connectionMode = resolveAccountCredentialMode(a);
                     const health = resolveRuntimeHealth(a);
                     const isExpanded = expandedAccountIds.includes(a.id);
+                    const hintMessage = (a.status === 'expired' && !capabilities.proxyOnly)
+                      ? '账号已过期，请重新绑定'
+                      : (health.reason || '-');
                     return (
                       <MobileCard
                         key={a.id}
@@ -1431,6 +1434,10 @@ export default function Accounts() {
                             <MobileField
                               label="账号状态"
                               value={a.status === 'expired' ? '已过期' : (a.status || '-')}
+                            />
+                            <MobileField
+                              label="提示"
+                              value={hintMessage}
                             />
                           </div>
                         ) : null}
