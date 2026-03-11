@@ -55,6 +55,21 @@ into <strong>one API Key, one endpoint</strong>, with automatic model discovery,
 
 ---
 
+## 🌐 Live Demo
+
+> Try Metapi without deploying — full-featured demo instance:
+
+| | |
+|---|---|
+| 🔗 **Demo URL** | [metapi-t9od.onrender.com](https://metapi-t9od.onrender.com/) |
+| 🔑 **Admin Token** | `123456` |
+
+> **⚠️ Security Notice**: This is a public demo. **Do NOT enter any real API keys, credentials, or site information.** Data may be reset at any time.
+
+> **ℹ️ Note**: Demo runs on Render free tier + OpenRouter free models (only `:free` suffixed models available). First visit may take 30-60s to wake up.
+
+---
+
 ## About
 
 The AI ecosystem is seeing a growing number of aggregation relay stations based on New API / One API and similar projects. Managing balances, model lists, and API keys across multiple sites is scattered and time-consuming.
