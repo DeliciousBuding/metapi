@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { memo, useState, type ReactNode } from 'react';
 import {
   DndContext,
   KeyboardSensor,
@@ -30,10 +30,10 @@ type RouteCardProps = {
   route: RouteSummaryRow;
   brand: BrandInfo | null;
   expanded: boolean;
-  onToggleExpand: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onToggleEnabled: () => void;
+  onToggleExpand: (routeId: number) => void;
+  onEdit: (route: RouteSummaryRow) => void;
+  onDelete: (routeId: number) => void;
+  onToggleEnabled: (route: RouteSummaryRow) => void;
   // Channel data (loaded on demand)
   channels: RouteChannel[] | undefined;
   loadingChannels: boolean;
@@ -46,14 +46,14 @@ type RouteCardProps = {
   updatingChannel: Record<number, boolean>;
   savingPriority: boolean;
   onTokenDraftChange: (channelId: number, tokenId: number) => void;
-  onSaveToken: (channelId: number, accountId: number) => void;
-  onDeleteChannel: (channelId: number) => void;
-  onChannelDragEnd: (event: DragEndEvent) => void;
+  onSaveToken: (routeId: number, channelId: number, accountId: number) => void;
+  onDeleteChannel: (channelId: number, routeId: number) => void;
+  onChannelDragEnd: (routeId: number, event: DragEndEvent) => void;
   // Missing token hints
   missingTokenSiteItems: MissingTokenRouteSiteActionItem[];
   onCreateTokenForMissing: (accountId: number, modelName: string) => void;
   // Add channel
-  onAddChannel: () => void;
+  onAddChannel: (routeId: number) => void;
   // Source group expansion
   expandedSourceGroupMap: Record<string, boolean>;
   onToggleSourceGroup: (groupKey: string) => void;
@@ -71,7 +71,7 @@ function AnimatedCollapseSection({ open, children }: { open: boolean; children: 
   );
 }
 
-export default function RouteCard({
+function RouteCardInner({
   route,
   brand,
   expanded,
@@ -135,11 +135,11 @@ export default function RouteCard({
     return (
       <div
         className="card route-card-collapsed"
-        onClick={onToggleExpand}
+        onClick={() => onToggleExpand(route.id)}
         style={{ cursor: 'pointer' }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', width: 20, height: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, width: 20, height: 20 }}>
             {routeIcon.kind === 'brand' ? (
               <BrandGlyph icon={routeIcon.value} alt={title} size={18} fallbackText={title} />
             ) : routeIcon.kind === 'text' ? (
@@ -151,32 +151,30 @@ export default function RouteCard({
             )}
           </span>
 
-          <code style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)' }}>
+          <code style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>
             {title}
           </code>
 
           {route.displayName && route.displayName.trim() !== route.modelPattern ? (
-            <span className="badge badge-muted" style={{ fontSize: 10 }}>{route.modelPattern}</span>
+            <span className="badge badge-muted" style={{ fontSize: 10, flexShrink: 0 }}>{route.modelPattern}</span>
           ) : null}
 
           <button
             className={`badge route-enable-toggle ${route.enabled ? 'is-enabled' : 'is-disabled'}`}
-            style={{ fontSize: 11, cursor: 'pointer', border: 'none' }}
-            onClick={(e) => { e.stopPropagation(); onToggleEnabled(); }}
+            style={{ fontSize: 11, cursor: 'pointer', border: 'none', flexShrink: 0, minWidth: 36, textAlign: 'center' }}
+            onClick={(e) => { e.stopPropagation(); onToggleEnabled(route); }}
             data-tooltip={route.enabled ? '点击禁用此路由' : '点击启用此路由'}
           >
             {route.enabled ? tr('启用') : tr('禁用')}
           </button>
 
-          <span className="badge badge-info" style={{ fontSize: 10 }}>
+          <span className="badge badge-info" style={{ fontSize: 10, flexShrink: 0 }}>
             {route.channelCount} {tr('通道')}
           </span>
 
-          <div style={{ flex: 1 }} />
-
           <svg
             width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2"
-            style={{ color: 'var(--color-text-muted)' }}
+            style={{ flexShrink: 0, color: 'var(--color-text-muted)' }}
             aria-hidden
           >
             <path d="m5 7 5 6 5-6" />
@@ -212,7 +210,7 @@ export default function RouteCard({
           <button
             className={`badge route-enable-toggle ${route.enabled ? 'is-enabled' : 'is-disabled'}`}
             style={{ fontSize: 11, cursor: 'pointer', border: 'none' }}
-            onClick={(e) => { e.stopPropagation(); onToggleEnabled(); }}
+            onClick={(e) => { e.stopPropagation(); onToggleEnabled(route); }}
             data-tooltip={route.enabled ? '点击禁用此路由' : '点击启用此路由'}
           >
             {route.enabled ? tr('启用') : tr('禁用')}
@@ -227,11 +225,11 @@ export default function RouteCard({
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {!exactRoute && (
-            <button onClick={onEdit} className="btn btn-link">{tr('编辑群组')}</button>
+            <button onClick={() => onEdit(route)} className="btn btn-link">{tr('编辑群组')}</button>
           )}
-          <button onClick={onDelete} className="btn btn-link btn-link-danger">{tr('删除路由')}</button>
+          <button onClick={() => onDelete(route.id)} className="btn btn-link btn-link-danger">{tr('删除路由')}</button>
           <button
-            onClick={onToggleExpand}
+            onClick={() => onToggleExpand(route.id)}
             className="btn btn-ghost"
             style={{ padding: '4px 8px', border: '1px solid var(--color-border)' }}
             data-tooltip={tr('收起')}
@@ -273,7 +271,7 @@ export default function RouteCard({
           </div>
         ) : <div />}
         <button
-          onClick={onAddChannel}
+          onClick={() => onAddChannel(route.id)}
           className="btn btn-ghost"
           style={{ fontSize: 12, padding: '6px 10px', color: 'var(--color-primary)', border: '1px solid var(--color-border)', whiteSpace: 'nowrap' }}
         >
@@ -289,7 +287,7 @@ export default function RouteCard({
         </div>
       ) : channels && channels.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onChannelDragEnd}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(event) => onChannelDragEnd(route.id, event)}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {channelGroups.map((group) => {
                 const groupKey = buildSourceGroupKey(route.id, group.sourceModel || '');
@@ -357,8 +355,8 @@ export default function RouteCard({
                               activeTokenId={activeTokenId}
                               isUpdatingToken={!!updatingChannel[channel.id]}
                               onTokenDraftChange={onTokenDraftChange}
-                              onSaveToken={() => onSaveToken(channel.id, channel.accountId)}
-                              onDeleteChannel={() => onDeleteChannel(channel.id)}
+                              onSaveToken={() => onSaveToken(route.id, channel.id, channel.accountId)}
+                              onDeleteChannel={() => onDeleteChannel(channel.id, route.id)}
                             />
                           );
                         })}
@@ -381,3 +379,6 @@ export default function RouteCard({
     </div>
   );
 }
+
+const RouteCard = memo(RouteCardInner);
+export default RouteCard;
