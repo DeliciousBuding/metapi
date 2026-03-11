@@ -15,7 +15,7 @@ type ProxyFileColumnCompatibilitySpec = {
 const CREATE_TABLE_SQL: Record<ProxyFileSchemaDialect, string> = {
   sqlite: 'CREATE TABLE IF NOT EXISTS "proxy_files" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, "public_id" TEXT NOT NULL, "owner_type" TEXT NOT NULL, "owner_id" TEXT NOT NULL, "filename" TEXT NOT NULL, "mime_type" TEXT NOT NULL, "purpose" TEXT, "byte_size" INTEGER NOT NULL, "sha256" TEXT NOT NULL, "content_base64" TEXT NOT NULL, "created_at" TEXT, "updated_at" TEXT, "deleted_at" TEXT)',
   postgres: 'CREATE TABLE IF NOT EXISTS "proxy_files" ("id" SERIAL PRIMARY KEY, "public_id" TEXT NOT NULL, "owner_type" TEXT NOT NULL, "owner_id" TEXT NOT NULL, "filename" TEXT NOT NULL, "mime_type" TEXT NOT NULL, "purpose" TEXT, "byte_size" INTEGER NOT NULL, "sha256" TEXT NOT NULL, "content_base64" TEXT NOT NULL, "created_at" TEXT, "updated_at" TEXT, "deleted_at" TEXT)',
-  mysql: 'CREATE TABLE IF NOT EXISTS `proxy_files` (`id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY, `public_id` TEXT NOT NULL, `owner_type` TEXT NOT NULL, `owner_id` TEXT NOT NULL, `filename` TEXT NOT NULL, `mime_type` TEXT NOT NULL, `purpose` TEXT NULL, `byte_size` INTEGER NOT NULL, `sha256` TEXT NOT NULL, `content_base64` LONGTEXT NOT NULL, `created_at` TEXT NULL, `updated_at` TEXT NULL, `deleted_at` TEXT NULL)',
+  mysql: 'CREATE TABLE IF NOT EXISTS `proxy_files` (`id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY, `public_id` VARCHAR(191) NOT NULL, `owner_type` VARCHAR(64) NOT NULL, `owner_id` VARCHAR(191) NOT NULL, `filename` TEXT NOT NULL, `mime_type` VARCHAR(191) NOT NULL, `purpose` TEXT NULL, `byte_size` INTEGER NOT NULL, `sha256` VARCHAR(191) NOT NULL, `content_base64` LONGTEXT NOT NULL, `created_at` TEXT NULL, `updated_at` TEXT NULL, `deleted_at` TEXT NULL)',
 };
 
 const COLUMN_COMPATIBILITY_SPECS: ProxyFileColumnCompatibilitySpec[] = [
@@ -24,7 +24,7 @@ const COLUMN_COMPATIBILITY_SPECS: ProxyFileColumnCompatibilitySpec[] = [
     addSql: {
       sqlite: 'ALTER TABLE "proxy_files" ADD COLUMN "public_id" TEXT',
       postgres: 'ALTER TABLE "proxy_files" ADD COLUMN "public_id" TEXT',
-      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `public_id` TEXT NULL',
+      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `public_id` VARCHAR(191) NULL',
     },
   },
   {
@@ -32,7 +32,7 @@ const COLUMN_COMPATIBILITY_SPECS: ProxyFileColumnCompatibilitySpec[] = [
     addSql: {
       sqlite: 'ALTER TABLE "proxy_files" ADD COLUMN "owner_type" TEXT',
       postgres: 'ALTER TABLE "proxy_files" ADD COLUMN "owner_type" TEXT',
-      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `owner_type` TEXT NULL',
+      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `owner_type` VARCHAR(64) NULL',
     },
   },
   {
@@ -40,7 +40,7 @@ const COLUMN_COMPATIBILITY_SPECS: ProxyFileColumnCompatibilitySpec[] = [
     addSql: {
       sqlite: 'ALTER TABLE "proxy_files" ADD COLUMN "owner_id" TEXT',
       postgres: 'ALTER TABLE "proxy_files" ADD COLUMN "owner_id" TEXT',
-      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `owner_id` TEXT NULL',
+      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `owner_id` VARCHAR(191) NULL',
     },
   },
   {
@@ -56,7 +56,7 @@ const COLUMN_COMPATIBILITY_SPECS: ProxyFileColumnCompatibilitySpec[] = [
     addSql: {
       sqlite: 'ALTER TABLE "proxy_files" ADD COLUMN "mime_type" TEXT',
       postgres: 'ALTER TABLE "proxy_files" ADD COLUMN "mime_type" TEXT',
-      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `mime_type` TEXT NULL',
+      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `mime_type` VARCHAR(191) NULL',
     },
   },
   {
@@ -80,7 +80,7 @@ const COLUMN_COMPATIBILITY_SPECS: ProxyFileColumnCompatibilitySpec[] = [
     addSql: {
       sqlite: 'ALTER TABLE "proxy_files" ADD COLUMN "sha256" TEXT',
       postgres: 'ALTER TABLE "proxy_files" ADD COLUMN "sha256" TEXT',
-      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `sha256` TEXT NULL',
+      mysql: 'ALTER TABLE `proxy_files` ADD COLUMN `sha256` VARCHAR(191) NULL',
     },
   },
   {
@@ -127,8 +127,8 @@ const CREATE_INDEX_SQL: Record<ProxyFileSchemaDialect, string[]> = {
     'CREATE INDEX IF NOT EXISTS "proxy_files_owner_lookup_idx" ON "proxy_files" ("owner_type", "owner_id", "deleted_at")',
   ],
   mysql: [
-    'CREATE UNIQUE INDEX `proxy_files_public_id_unique` ON `proxy_files` (`public_id`(191))',
-    'CREATE INDEX `proxy_files_owner_lookup_idx` ON `proxy_files` (`owner_type`(191), `owner_id`(191), `deleted_at`(191))',
+    'CREATE UNIQUE INDEX `proxy_files_public_id_unique` ON `proxy_files` (`public_id`)',
+    'CREATE INDEX `proxy_files_owner_lookup_idx` ON `proxy_files` (`owner_type`, `owner_id`)',
   ],
 };
 
