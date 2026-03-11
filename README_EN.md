@@ -30,6 +30,9 @@ into <strong>one API Key, one endpoint</strong>, with automatic model discovery,
 --><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&style=flat"><!--
 --><a href="https://zeabur.com/templates/DOX5PR">
   <img alt="Deploy on Zeabur" src="https://zeabur.com/button.svg" height="28">
+</a><!--
+--><a href="https://render.com/deploy?repo=https://github.com/cita-777/metapi">
+  <img alt="Deploy to Render" src="https://render.com/images/deploy-to-render-button.svg" height="28">
 </a>
 </p>
 

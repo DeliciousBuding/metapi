@@ -9,6 +9,7 @@
 | 场景 | 推荐方式 | 对外访问方式 | 数据位置 |
 |------|----------|--------------|----------|
 | 云服务器 / NAS / 家用主机长期运行 | Docker / Docker Compose / Zeabur | 固定服务地址，例如 `http://your-host:4000` 或反向代理域名 | 你挂载的 `DATA_DIR` / 持久化卷 |
+| 免费云部署（24h 在线） | Render + TiDB + UptimeRobot | Render 分配的 `.onrender.com` 域名或自定义域名 | TiDB Serverless（外部 MySQL 数据库） |
 | 个人电脑本地使用 | 桌面版安装包 | 桌面窗口；如需本机客户端直连，使用日志中打印的 `http://127.0.0.1:<port>` | Electron `app.getPath('userData')/data` |
 | 二次开发 / 调试 | 本地开发 | 前端 `http://localhost:5173`，后端默认 `http://localhost:4000` | 仓库内 `./data` 或自定义 `DATA_DIR` |
 
@@ -41,6 +42,86 @@
 | `PORT` | 内部监听端口（默认 `4000`，一般无需修改） |
 
 部署完成后，通过 Zeabur 分配的域名访问后台管理面板即可。
+
+---
+
+## Render 一键部署（免费 24h 运行）
+
+<a href="https://render.com/deploy?repo=https://github.com/cita-777/metapi">
+  <img alt="Deploy to Render" src="https://render.com/images/deploy-to-render-button.svg" height="28">
+</a>
+
+通过 **Render + TiDB + UptimeRobot** 组合，可以实现 **完全免费的 24 小时持续运行**：
+
+| 组件 | 作用 | 免费额度 |
+|------|------|----------|
+| [Render](https://render.com) | 运行 Metapi 容器 | Free Web Service（750 小时/月，闲置 15 分钟自动休眠） |
+| [TiDB Serverless](https://tidbcloud.com) | MySQL 兼容数据库，替代 SQLite 实现数据持久化 | 5 GiB 存储 + 5000 万 Request Units/月 |
+| [UptimeRobot](https://uptimerobot.com) | 每 5 分钟 ping 一次，防止 Render 免费实例休眠 | 50 个免费监控 |
+
+> [!IMPORTANT]
+> Render 免费版 **不支持持久化磁盘**，容器重启后本地文件会丢失。因此 **必须使用外部数据库**（推荐 TiDB Serverless），不能使用默认的 SQLite。
+
+### 步骤 1：注册 TiDB Serverless 并获取连接串
+
+1. 前往 [TiDB Cloud](https://tidbcloud.com) 注册账号
+2. 创建一个 **Serverless** 集群（免费）
+3. 在集群概览页点击 **Connect**，选择连接方式 **General**，获取连接参数
+4. 拼接为 Metapi 所需的 `DB_URL` 格式：
+
+   ```
+   mysql://<user>:<password>@<host>:4000/<database>?ssl={"rejectUnauthorized":true}
+   ```
+
+   > 将 `<user>`、`<password>`、`<host>`、`<database>` 替换为 TiDB 提供的实际值。
+
+> [!TIP]
+> 这里只是以TiDB作为示例，你也可以使用其他提供免费额度的云数据库方案（如 Neon、Supabase 等），只需将 `DB_TYPE` 设为对应的 `mysql` 或 `postgres`，并填入正确的连接串即可。什么？你不会其他的？把步骤复制给Gemini问他怎么改。
+
+### 步骤 2：部署到 Render
+
+**方式一：一键部署（推荐）**
+
+1. 点击上方 **Deploy to Render** 按钮
+2. 如果你 Fork 了仓库，也可以使用你自己的仓库地址
+3. 在 Render 界面中填写环境变量（见下表）
+
+**方式二：手动创建**
+
+1. 在 [Render Dashboard](https://dashboard.render.com) 点击 **New → Web Service**
+2. 连接你的 GitHub 仓库（或使用公开仓库地址 `https://github.com/cita-777/metapi`）
+3. 配置：
+   - **Environment**: Docker
+   - **Dockerfile Path**: `./docker/Dockerfile`
+   - **Docker Build Context**: `.`（仓库根目录）
+   - **Instance Type**: Free
+4. 添加环境变量（见下表）
+
+### 环境变量配置
+
+| 变量 | 说明 | 示例值 |
+|------|------|--------|
+| `AUTH_TOKEN` | 管理后台登录令牌（**必填**） | 你的强密码 |
+| `PROXY_TOKEN` | 代理接口 Bearer Token（**必填**） | 你的代理密钥 |
+| `DB_TYPE` | 数据库类型（**必填**） | `mysql` |
+| `DB_URL` | TiDB 连接串（**必填**） | `mysql://user:pass@host:4000/db?ssl=...` |
+| `DB_SSL` | 启用 SSL 连接 | `true` |
+| `TZ` | 时区 | `Asia/Shanghai` |
+| `PORT` | 服务端口（默认即可） | `4000` |
+
+### 步骤 3：配置 UptimeRobot 防休眠
+
+Render 免费实例在 15 分钟无流量后会自动休眠。使用 UptimeRobot 定时 ping 可以保持实例 24h 在线：
+
+1. 前往 [UptimeRobot](https://uptimerobot.com) 注册免费账号
+2. 添加新监控：
+   - **Monitor Type**: HTTP(s)
+   - **URL**: `https://your-app.onrender.com`（替换为 Render 分配的域名）
+   - **Monitoring Interval**: 5 minutes
+3. 保存即可，UptimeRobot 会每 5 分钟访问一次你的服务，防止休眠
+
+> [!TIP]
+> 部署完成后，通过 Render 分配的 `.onrender.com` 域名访问后台，使用 `AUTH_TOKEN` 登录即可。也可以在 Render 设置中绑定自定义域名。
 
 ---
 
@@ -200,6 +281,7 @@ docker image prune -f
 | 运行方式 | 数据目录 | 说明 |
 |----------|----------|------|
 | Docker / Docker Compose / Zeabur | 容器内 `DATA_DIR`（常见为 `/app/data`） | 需要映射到宿主机目录或平台持久化卷 |
+| Render + TiDB | TiDB Serverless（外部 MySQL） | 无本地持久化，数据全部存储在 TiDB 云端数据库 |
 | 本地开发 | `DATA_DIR`，默认 `./data` | 位于当前仓库工作目录 |
 | 桌面版 | `app.getPath('userData')/data` | 不在仓库目录里，升级桌面应用时会保留 |
 
