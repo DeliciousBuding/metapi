@@ -86,25 +86,44 @@ function globToRegexSource(glob: string): string {
   return source;
 }
 
+const compiledGlobCache = new Map<string, RegExp | null>();
+
 function matchesGlobPattern(model: string, pattern: string): boolean {
-  try {
-    return new RegExp(`^${globToRegexSource(pattern)}$`).test(model);
-  } catch {
-    return false;
+  let re = compiledGlobCache.get(pattern);
+  if (re === undefined) {
+    try {
+      re = new RegExp(`^${globToRegexSource(pattern)}$`);
+    } catch {
+      re = null;
+    }
+    compiledGlobCache.set(pattern, re);
   }
+  return re ? re.test(model) : false;
 }
+
+const matchCache = new Map<string, boolean>();
+const MATCH_CACHE_LIMIT = 4000;
 
 export function matchesModelPattern(model: string, pattern: string): boolean {
   const normalized = (pattern || '').trim();
   if (!normalized) return false;
   if (normalized === model) return true;
 
+  const cacheKey = `${model}\0${normalized}`;
+  const cached = matchCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  let result: boolean;
   if (isRegexModelPattern(normalized)) {
     const parsed = parseRegexModelPattern(normalized);
-    return !!parsed.regex && parsed.regex.test(model);
+    result = !!parsed.regex && parsed.regex.test(model);
+  } else {
+    result = matchesGlobPattern(model, normalized);
   }
 
-  return matchesGlobPattern(model, normalized);
+  if (matchCache.size >= MATCH_CACHE_LIMIT) matchCache.clear();
+  matchCache.set(cacheKey, result);
+  return result;
 }
 
 export function getModelPatternError(modelPattern: string): string | null {
