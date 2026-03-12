@@ -137,8 +137,8 @@ export const routeChannels = sqliteTable('route_channels', {
   lastUsedAt: text('last_used_at'),
   lastSelectedAt: text('last_selected_at'),
   lastFailAt: text('last_fail_at'),
-  consecutiveFailCount: integer('consecutive_fail_count').default(0),
-  cooldownLevel: integer('cooldown_level').default(0),
+  consecutiveFailCount: integer('consecutive_fail_count').notNull().default(0),
+  cooldownLevel: integer('cooldown_level').notNull().default(0),
   cooldownUntil: text('cooldown_until'),
 }, (table) => ({
   routeIdIdx: index('route_channels_route_id_idx').on(table.routeId),

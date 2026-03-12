@@ -428,11 +428,11 @@ function ensureRouteGroupingSchema() {
   }
 
   if (!tableColumnExists('route_channels', 'consecutive_fail_count')) {
-    sqlite.exec(`ALTER TABLE route_channels ADD COLUMN consecutive_fail_count integer DEFAULT 0;`);
+    sqlite.exec(`ALTER TABLE route_channels ADD COLUMN consecutive_fail_count integer NOT NULL DEFAULT 0;`);
   }
 
   if (!tableColumnExists('route_channels', 'cooldown_level')) {
-    sqlite.exec(`ALTER TABLE route_channels ADD COLUMN cooldown_level integer DEFAULT 0;`);
+    sqlite.exec(`ALTER TABLE route_channels ADD COLUMN cooldown_level integer NOT NULL DEFAULT 0;`);
   }
 }
 
