@@ -270,6 +270,17 @@ function ensureSiteUseSystemProxySchema() {
   `);
 }
 
+function ensureSiteCustomHeadersSchema() {
+  const sqlite = requireSqliteConnection();
+  if (!tableExists('sites')) {
+    return;
+  }
+
+  if (!tableColumnExists('sites', 'custom_headers')) {
+    sqlite.exec(`ALTER TABLE sites ADD COLUMN custom_headers text;`);
+  }
+}
+
 function ensureSiteExternalCheckinUrlSchema() {
   const sqlite = requireSqliteConnection();
   if (!tableExists('sites')) {
@@ -818,6 +829,7 @@ function initSqliteDb() {
   ensureSiteStatusSchema();
   ensureSiteProxySchema();
   ensureSiteUseSystemProxySchema();
+  ensureSiteCustomHeadersSchema();
   ensureSiteExternalCheckinUrlSchema();
   ensureSiteGlobalWeightSchema();
   ensureRouteGroupingSchema();
