@@ -35,6 +35,7 @@ import {
   ensureProxyFileCompatibilityColumns,
   ensureProxyLogBillingDetailsColumn,
   ensureRouteGroupingCompatibilityColumns,
+  ensureSharedIndexCompatibility,
   ensureSiteCompatibilityColumns,
   runtimeDbDialect,
   schema,
@@ -264,6 +265,7 @@ try {
   await ensureSiteCompatibilityColumns();
   await ensureRouteGroupingCompatibilityColumns();
   await ensureProxyFileCompatibilityColumns();
+  await ensureSharedIndexCompatibility();
   const finalRows = await db.select().from(schema.settings).all();
   const finalMap = toSettingsMap(finalRows);
   applyRuntimeSettings(finalMap);
