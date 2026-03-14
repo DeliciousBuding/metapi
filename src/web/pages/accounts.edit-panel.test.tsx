@@ -12,6 +12,7 @@ const { apiMock, toastMock } = vi.hoisted(() => ({
     updateAccount: vi.fn(),
     refreshAccountHealth: vi.fn(),
     checkModels: vi.fn(),
+    getAccountModels: vi.fn(),
   },
   toastMock: {
     success: vi.fn(),
@@ -62,6 +63,16 @@ describe('Accounts edit panel', () => {
     ]);
     apiMock.updateAccount.mockResolvedValue({ success: true });
     apiMock.refreshAccountHealth.mockResolvedValue({ success: true });
+    apiMock.getAccountModels.mockResolvedValue({
+      siteId: 1,
+      siteName: 'Site A',
+      models: [
+        { name: 'gpt-4', latencyMs: 120, disabled: false },
+        { name: 'gpt-3.5', latencyMs: 80, disabled: false },
+      ],
+      totalCount: 2,
+      disabledCount: 0,
+    });
   });
 
   afterEach(() => {
@@ -103,13 +114,16 @@ describe('Accounts edit panel', () => {
     }
   });
 
-  it('shows model refresh toast on success', async () => {
-    apiMock.checkModels.mockResolvedValue({
-      refresh: {
-        status: 'success',
-        modelCount: 2,
-        modelsPreview: ['gpt-4', 'gpt-3.5'],
-      },
+  it('opens model modal when clicking model button', async () => {
+    apiMock.getAccountModels.mockResolvedValue({
+      siteId: 1,
+      siteName: 'Site A',
+      models: [
+        { name: 'gpt-4', latencyMs: 120, disabled: false },
+        { name: 'gpt-3.5', latencyMs: 80, disabled: false },
+      ],
+      totalCount: 2,
+      disabledCount: 0,
     });
 
     let root: ReturnType<typeof create> | null = null;
@@ -139,10 +153,12 @@ describe('Accounts edit panel', () => {
       });
       await flushMicrotasks();
 
-      expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('已获取到模型'));
-      expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('（共 2 个）'));
+      // Should call getAccountModels to open the model management modal
+      expect(apiMock.getAccountModels).toHaveBeenCalledWith(1);
     } finally {
       root?.unmount();
     }
   });
 });
+
+
