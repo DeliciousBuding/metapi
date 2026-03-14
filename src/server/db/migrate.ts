@@ -174,28 +174,6 @@ function findMatchingSingleStatementMigration(
   return null;
 }
 
-function findMatchingMigrationByStatement(
-  migrationsFolder: string,
-  failedSqlText: string,
-): RecoveryMigrationRecord | null {
-  const normalizedFailedSql = normalizeSqlForMatch(failedSqlText);
-  const migrations = readRecoveryMigrations(migrationsFolder);
-
-  for (const migration of migrations) {
-    if (!migration.statements.some((statement) => normalizeSqlForMatch(statement) === normalizedFailedSql)) {
-      continue;
-    }
-
-    return {
-      tag: migration.tag,
-      createdAt: migration.createdAt,
-      hash: migration.hash,
-    };
-  }
-
-  return null;
-}
-
 function readRecoveryMigrations(migrationsFolder: string): RecoveryMigration[] {
   const journalPath = resolve(migrationsFolder, 'meta', '_journal.json');
   const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as MigrationJournalFile;
@@ -342,7 +320,7 @@ function tryRecoverDuplicateColumnMigrationError(
     return false;
   }
 
-  const matchedMigration = findMatchingMigrationByStatement(migrationsFolder, failedSqlText);
+  const matchedMigration = findMatchingSingleStatementMigration(migrationsFolder, failedSqlText);
   if (!matchedMigration) {
     return false;
   }
@@ -359,7 +337,6 @@ export const __migrateTestUtils = {
   normalizeSqlForMatch,
   extractFailedSqlFromError,
   findMatchingSingleStatementMigration,
-  findMatchingMigrationByStatement,
   readRecoveryMigrations,
   markMigrationRecordIfMissing,
   recoverMigrationSequence,

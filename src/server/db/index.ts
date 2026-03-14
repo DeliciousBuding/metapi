@@ -9,13 +9,10 @@ import { ensureSiteSchemaCompatibility, type SiteSchemaInspector } from './siteS
 import { ensureRouteGroupingSchemaCompatibility } from './routeGroupingSchemaCompatibility.js';
 import { ensureProxyFileSchemaCompatibility } from './proxyFileSchemaCompatibility.js';
 import { ensureSharedIndexSchemaCompatibility } from './sharedIndexSchemaCompatibility.js';
-import { executeLegacyCompat, executeLegacyCompatSync } from './legacySchemaCompat.js';
 import { config } from '../config.js';
 import { ensureRuntimeDatabaseReady } from '../runtimeDatabaseBootstrap.js';
 import { mkdirSync } from 'fs';
-import { tmpdir } from 'os';
 import { dirname, resolve } from 'path';
-import { threadId } from 'worker_threads';
 
 export type RuntimeDbDialect = 'sqlite' | 'mysql' | 'postgres';
 type SqlMethod = 'all' | 'get' | 'run' | 'values' | 'execute';
@@ -45,13 +42,7 @@ let proxyLogBillingDetailsColumnAvailable: boolean | null = null;
 
 function resolveSqlitePath(): string {
   const raw = (config.dbUrl || '').trim();
-  if (!raw) {
-    const isolatedVitestPath = resolveVitestSqlitePath();
-    if (isolatedVitestPath) {
-      return isolatedVitestPath;
-    }
-    return resolve(`${config.dataDir}/hub.db`);
-  }
+  if (!raw) return resolve(`${config.dataDir}/hub.db`);
   if (raw === ':memory:') return raw;
   if (raw.startsWith('file://')) {
     const parsed = new URL(raw);
@@ -61,35 +52,6 @@ function resolveSqlitePath(): string {
     return resolve(raw.slice('sqlite://'.length).trim());
   }
   return resolve(raw);
-}
-
-function isVitestRuntime(): boolean {
-  if ((process.env.VITEST_POOL_ID || '').trim()) {
-    return true;
-  }
-  if ((process.env.VITEST_WORKER_ID || '').trim()) {
-    return true;
-  }
-  const runtimeArgs = [...process.argv, ...process.execArgv]
-    .map((value) => String(value || '').toLowerCase());
-  return runtimeArgs.some((value) => value.includes('vitest'));
-}
-
-function resolveVitestSqlitePath(): string | null {
-  if (!isVitestRuntime()) {
-    return null;
-  }
-  if ((process.env.DB_URL || '').trim()) {
-    return null;
-  }
-  if ((process.env.DATA_DIR || '').trim()) {
-    return null;
-  }
-
-  const workerTag = process.env.VITEST_POOL_ID
-    || process.env.VITEST_WORKER_ID
-    || `${process.pid}-${threadId}`;
-  return resolve(tmpdir(), `metapi-vitest-${workerTag}`, 'hub.db');
 }
 
 function requireSqliteConnection(): Database.Database {
@@ -112,19 +74,13 @@ function tableColumnExists(table: string, column: string): boolean {
   return rows.some((row) => row.name === column);
 }
 
-function execSqliteStatement(sqlText: string): void {
-  requireSqliteConnection().exec(sqlText);
-}
-
-function execSqliteLegacyCompat(sqlText: string): void {
-  executeLegacyCompatSync(execSqliteStatement, sqlText);
-}
-
 function ensureTokenManagementSchema() {
+  const sqlite = requireSqliteConnection();
   if (!tableExists('accounts') || !tableExists('route_channels')) {
     return;
   }
-  execSqliteLegacyCompat(`
+
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS account_tokens (
       id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
       account_id integer NOT NULL,
@@ -139,15 +95,16 @@ function ensureTokenManagementSchema() {
       FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE cascade
     );
   `);
+
   if (!tableColumnExists('route_channels', 'token_id')) {
-    execSqliteLegacyCompat('ALTER TABLE route_channels ADD COLUMN token_id integer;');
+    sqlite.exec('ALTER TABLE route_channels ADD COLUMN token_id integer;');
   }
 
   if (!tableColumnExists('account_tokens', 'token_group')) {
-    execSqliteLegacyCompat('ALTER TABLE account_tokens ADD COLUMN token_group text;');
+    sqlite.exec('ALTER TABLE account_tokens ADD COLUMN token_group text;');
   }
 
-  execSqliteStatement(`
+  sqlite.exec(`
     INSERT INTO account_tokens (account_id, name, token, source, enabled, is_default, created_at, updated_at)
     SELECT
       a.id,
@@ -169,7 +126,7 @@ function ensureTokenManagementSchema() {
       );
   `);
 
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS token_model_availability (
       id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
       token_id integer NOT NULL,
@@ -181,14 +138,15 @@ function ensureTokenManagementSchema() {
     );
   `);
 
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS token_model_availability_token_model_unique
     ON token_model_availability(token_id, model_name);
   `);
 }
 
 function ensureProxyVideoTaskSchema() {
-  execSqliteLegacyCompat(`
+  const sqlite = requireSqliteConnection();
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS proxy_video_tasks (
       id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
       public_id text NOT NULL,
@@ -208,29 +166,30 @@ function ensureProxyVideoTaskSchema() {
     );
   `);
   if (!tableColumnExists('proxy_video_tasks', 'status_snapshot')) {
-    execSqliteLegacyCompat('ALTER TABLE proxy_video_tasks ADD COLUMN status_snapshot text;');
+    sqlite.exec('ALTER TABLE proxy_video_tasks ADD COLUMN status_snapshot text;');
   }
   if (!tableColumnExists('proxy_video_tasks', 'upstream_response_meta')) {
-    execSqliteLegacyCompat('ALTER TABLE proxy_video_tasks ADD COLUMN upstream_response_meta text;');
+    sqlite.exec('ALTER TABLE proxy_video_tasks ADD COLUMN upstream_response_meta text;');
   }
   if (!tableColumnExists('proxy_video_tasks', 'last_upstream_status')) {
-    execSqliteLegacyCompat('ALTER TABLE proxy_video_tasks ADD COLUMN last_upstream_status integer;');
+    sqlite.exec('ALTER TABLE proxy_video_tasks ADD COLUMN last_upstream_status integer;');
   }
   if (!tableColumnExists('proxy_video_tasks', 'last_polled_at')) {
-    execSqliteLegacyCompat('ALTER TABLE proxy_video_tasks ADD COLUMN last_polled_at text;');
+    sqlite.exec('ALTER TABLE proxy_video_tasks ADD COLUMN last_polled_at text;');
   }
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS proxy_video_tasks_public_id_unique
     ON proxy_video_tasks(public_id);
   `);
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE INDEX IF NOT EXISTS proxy_video_tasks_upstream_video_id_idx
     ON proxy_video_tasks(upstream_video_id);
   `);
 }
 
 function ensureProxyFileSchema() {
-  execSqliteLegacyCompat(`
+  const sqlite = requireSqliteConnection();
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS proxy_files (
       id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
       public_id text NOT NULL,
@@ -247,26 +206,27 @@ function ensureProxyFileSchema() {
       deleted_at text
     );
   `);
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS proxy_files_public_id_unique
     ON proxy_files(public_id);
   `);
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE INDEX IF NOT EXISTS proxy_files_owner_lookup_idx
     ON proxy_files(owner_type, owner_id, deleted_at);
   `);
 }
 
 function ensureSiteStatusSchema() {
+  const sqlite = requireSqliteConnection();
   if (!tableExists('sites')) {
     return;
   }
 
   if (!tableColumnExists('sites', 'status')) {
-    execSqliteLegacyCompat(`ALTER TABLE sites ADD COLUMN status text DEFAULT 'active';`);
+    sqlite.exec(`ALTER TABLE sites ADD COLUMN status text DEFAULT 'active';`);
   }
 
-  execSqliteStatement(`
+  sqlite.exec(`
     UPDATE sites
     SET status = lower(trim(status))
     WHERE status IS NOT NULL
@@ -274,7 +234,7 @@ function ensureSiteStatusSchema() {
       AND status != lower(trim(status));
   `);
 
-  execSqliteStatement(`
+  sqlite.exec(`
     UPDATE sites
     SET status = 'active'
     WHERE status IS NULL
@@ -284,25 +244,27 @@ function ensureSiteStatusSchema() {
 }
 
 function ensureSiteProxySchema() {
+  const sqlite = requireSqliteConnection();
   if (!tableExists('sites')) {
     return;
   }
 
   if (!tableColumnExists('sites', 'proxy_url')) {
-    execSqliteLegacyCompat(`ALTER TABLE sites ADD COLUMN proxy_url text;`);
+    sqlite.exec(`ALTER TABLE sites ADD COLUMN proxy_url text;`);
   }
 }
 
 function ensureSiteUseSystemProxySchema() {
+  const sqlite = requireSqliteConnection();
   if (!tableExists('sites')) {
     return;
   }
 
   if (!tableColumnExists('sites', 'use_system_proxy')) {
-    execSqliteLegacyCompat(`ALTER TABLE sites ADD COLUMN use_system_proxy integer DEFAULT 0;`);
+    sqlite.exec(`ALTER TABLE sites ADD COLUMN use_system_proxy integer DEFAULT 0;`);
   }
 
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     UPDATE sites
     SET use_system_proxy = 0
     WHERE use_system_proxy IS NULL;
@@ -310,35 +272,38 @@ function ensureSiteUseSystemProxySchema() {
 }
 
 function ensureSiteCustomHeadersSchema() {
+  const sqlite = requireSqliteConnection();
   if (!tableExists('sites')) {
     return;
   }
 
   if (!tableColumnExists('sites', 'custom_headers')) {
-    execSqliteLegacyCompat(`ALTER TABLE sites ADD COLUMN custom_headers text;`);
+    sqlite.exec(`ALTER TABLE sites ADD COLUMN custom_headers text;`);
   }
 }
 
 function ensureSiteExternalCheckinUrlSchema() {
+  const sqlite = requireSqliteConnection();
   if (!tableExists('sites')) {
     return;
   }
 
   if (!tableColumnExists('sites', 'external_checkin_url')) {
-    execSqliteLegacyCompat(`ALTER TABLE sites ADD COLUMN external_checkin_url text;`);
+    sqlite.exec(`ALTER TABLE sites ADD COLUMN external_checkin_url text;`);
   }
 }
 
 function ensureSiteGlobalWeightSchema() {
+  const sqlite = requireSqliteConnection();
   if (!tableExists('sites')) {
     return;
   }
 
   if (!tableColumnExists('sites', 'global_weight')) {
-    execSqliteLegacyCompat(`ALTER TABLE sites ADD COLUMN global_weight real DEFAULT 1;`);
+    sqlite.exec(`ALTER TABLE sites ADD COLUMN global_weight real DEFAULT 1;`);
   }
 
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     UPDATE sites
     SET global_weight = 1
     WHERE global_weight IS NULL
@@ -359,7 +324,7 @@ function createSqliteSchemaInspector(): RuntimeSchemaInspector {
     tableExists: async (table) => tableExists(table),
     columnExists: async (table, column) => tableColumnExists(table, column),
     execute: async (sqlText) => {
-      executeLegacyCompatSync(execSqliteStatement, sqlText);
+      requireSqliteConnection().exec(sqlText);
     },
   };
 }
@@ -383,7 +348,7 @@ function createMysqlSchemaInspector(): RuntimeSchemaInspector | null {
         return Array.isArray(rows) && rows.length > 0;
       },
       execute: async (sqlText) => {
-        await executeLegacyCompat((statement) => mysqlPool!.query(statement).then(() => undefined), sqlText);
+        await mysqlPool!.query(sqlText);
       },
     };
 }
@@ -407,7 +372,7 @@ function createPostgresSchemaInspector(): RuntimeSchemaInspector | null {
       return Number(result.rowCount || 0) > 0;
     },
     execute: async (sqlText) => {
-      await executeLegacyCompat((statement) => pgPool!.query(statement).then(() => undefined), sqlText);
+      await pgPool!.query(sqlText);
     },
   };
 }
@@ -447,49 +412,51 @@ export async function ensureSharedIndexCompatibility(): Promise<void> {
 }
 
 function ensureRouteGroupingSchema() {
+  const sqlite = requireSqliteConnection();
   if (!tableExists('token_routes') || !tableExists('route_channels')) {
     return;
   }
 
   if (!tableColumnExists('token_routes', 'display_name')) {
-    execSqliteLegacyCompat(`ALTER TABLE token_routes ADD COLUMN display_name text;`);
+    sqlite.exec(`ALTER TABLE token_routes ADD COLUMN display_name text;`);
   }
 
   if (!tableColumnExists('token_routes', 'display_icon')) {
-    execSqliteLegacyCompat(`ALTER TABLE token_routes ADD COLUMN display_icon text;`);
+    sqlite.exec(`ALTER TABLE token_routes ADD COLUMN display_icon text;`);
   }
 
   if (!tableColumnExists('token_routes', 'decision_snapshot')) {
-    execSqliteLegacyCompat(`ALTER TABLE token_routes ADD COLUMN decision_snapshot text;`);
+    sqlite.exec(`ALTER TABLE token_routes ADD COLUMN decision_snapshot text;`);
   }
 
   if (!tableColumnExists('token_routes', 'decision_refreshed_at')) {
-    execSqliteLegacyCompat(`ALTER TABLE token_routes ADD COLUMN decision_refreshed_at text;`);
+    sqlite.exec(`ALTER TABLE token_routes ADD COLUMN decision_refreshed_at text;`);
   }
 
   if (!tableColumnExists('token_routes', 'routing_strategy')) {
-    execSqliteLegacyCompat(`ALTER TABLE token_routes ADD COLUMN routing_strategy text DEFAULT 'weighted';`);
+    sqlite.exec(`ALTER TABLE token_routes ADD COLUMN routing_strategy text DEFAULT 'weighted';`);
   }
 
   if (!tableColumnExists('route_channels', 'source_model')) {
-    execSqliteLegacyCompat(`ALTER TABLE route_channels ADD COLUMN source_model text;`);
+    sqlite.exec(`ALTER TABLE route_channels ADD COLUMN source_model text;`);
   }
 
   if (!tableColumnExists('route_channels', 'last_selected_at')) {
-    execSqliteLegacyCompat(`ALTER TABLE route_channels ADD COLUMN last_selected_at text;`);
+    sqlite.exec(`ALTER TABLE route_channels ADD COLUMN last_selected_at text;`);
   }
 
   if (!tableColumnExists('route_channels', 'consecutive_fail_count')) {
-    execSqliteLegacyCompat(`ALTER TABLE route_channels ADD COLUMN consecutive_fail_count integer NOT NULL DEFAULT 0;`);
+    sqlite.exec(`ALTER TABLE route_channels ADD COLUMN consecutive_fail_count integer NOT NULL DEFAULT 0;`);
   }
 
   if (!tableColumnExists('route_channels', 'cooldown_level')) {
-    execSqliteLegacyCompat(`ALTER TABLE route_channels ADD COLUMN cooldown_level integer NOT NULL DEFAULT 0;`);
+    sqlite.exec(`ALTER TABLE route_channels ADD COLUMN cooldown_level integer NOT NULL DEFAULT 0;`);
   }
 }
 
 function ensureDownstreamApiKeySchema() {
-  execSqliteLegacyCompat(`
+  const sqlite = requireSqliteConnection();
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS downstream_api_keys (
       id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
       name text NOT NULL,
@@ -510,31 +477,32 @@ function ensureDownstreamApiKeySchema() {
     );
   `);
 
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS downstream_api_keys_key_unique
     ON downstream_api_keys(key);
   `);
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE INDEX IF NOT EXISTS downstream_api_keys_name_idx
     ON downstream_api_keys(name);
   `);
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE INDEX IF NOT EXISTS downstream_api_keys_enabled_idx
     ON downstream_api_keys(enabled);
   `);
-  execSqliteLegacyCompat(`
+  sqlite.exec(`
     CREATE INDEX IF NOT EXISTS downstream_api_keys_expires_at_idx
     ON downstream_api_keys(expires_at);
   `);
 }
 
 function ensureProxyLogBillingDetailsSchema() {
+  const sqlite = requireSqliteConnection();
   if (!tableExists('proxy_logs')) {
     return;
   }
 
   if (!tableColumnExists('proxy_logs', 'billing_details')) {
-    execSqliteLegacyCompat('ALTER TABLE proxy_logs ADD COLUMN billing_details text;');
+    sqlite.exec('ALTER TABLE proxy_logs ADD COLUMN billing_details text;');
   }
 
   proxyLogBillingDetailsColumnAvailable = true;
@@ -594,16 +562,10 @@ export async function ensureProxyLogBillingDetailsColumn(): Promise<boolean> {
   try {
     if (runtimeDbDialect === 'mysql') {
       if (!mysqlPool) return false;
-      await executeLegacyCompat(
-        (statement) => mysqlPool!.query(statement).then(() => undefined),
-        'ALTER TABLE `proxy_logs` ADD COLUMN `billing_details` TEXT NULL',
-      );
+      await mysqlPool.query('ALTER TABLE `proxy_logs` ADD COLUMN `billing_details` TEXT NULL');
     } else {
       if (!pgPool) return false;
-      await executeLegacyCompat(
-        (statement) => pgPool!.query(statement).then(() => undefined),
-        'ALTER TABLE "proxy_logs" ADD COLUMN "billing_details" TEXT',
-      );
+      await pgPool.query('ALTER TABLE "proxy_logs" ADD COLUMN "billing_details" TEXT');
     }
     proxyLogBillingDetailsColumnAvailable = true;
     return true;
@@ -1031,6 +993,4 @@ export async function switchRuntimeDatabase(nextDialect: RuntimeDbDialect, nextD
 export const __dbProxyTestUtils = {
   wrapQueryLike,
   shouldWrapObject,
-  resolveSqlitePath,
-  resolveVitestSqlitePath,
 };
