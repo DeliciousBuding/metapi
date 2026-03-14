@@ -40,6 +40,7 @@ interface RuntimeSettingsBody {
   serverChanEnabled?: boolean;
   serverChanKey?: string;
   telegramEnabled?: boolean;
+  telegramApiBaseUrl?: string;
   telegramBotToken?: string;
   telegramChatId?: string;
   smtpEnabled?: boolean;
@@ -137,6 +138,10 @@ function isValidHttpUrl(raw: string): boolean {
   }
 }
 
+function normalizeTelegramApiBaseUrl(raw: string): string {
+  return String(raw || '').trim().replace(/\/+$/, '');
+}
+
 function applyImportedSettingToRuntime(key: string, value: unknown) {
   switch (key) {
     case 'checkin_cron': {
@@ -221,6 +226,11 @@ function applyImportedSettingToRuntime(key: string, value: unknown) {
     }
     case 'telegram_enabled': {
       config.telegramEnabled = !!value;
+      return;
+    }
+    case 'telegram_api_base_url': {
+      if (typeof value !== 'string') return;
+      config.telegramApiBaseUrl = normalizeTelegramApiBaseUrl(value) || 'https://api.telegram.org';
       return;
     }
     case 'telegram_bot_token': {
@@ -322,6 +332,7 @@ function getRuntimeSettingsResponse(currentAdminIp = '') {
     serverChanEnabled: config.serverChanEnabled,
     serverChanKeyMasked: maskSecret(config.serverChanKey),
     telegramEnabled: config.telegramEnabled,
+    telegramApiBaseUrl: config.telegramApiBaseUrl,
     telegramBotTokenMasked: maskSecret(config.telegramBotToken),
     telegramChatId: config.telegramChatId,
     smtpEnabled: config.smtpEnabled,
@@ -452,11 +463,15 @@ export async function settingsRoutes(app: FastifyInstance) {
     }
 
     const telegramTouched = body.telegramEnabled !== undefined
+      || body.telegramApiBaseUrl !== undefined
       || body.telegramBotToken !== undefined
       || body.telegramChatId !== undefined;
     const nextTelegramEnabled = body.telegramEnabled !== undefined
       ? !!body.telegramEnabled
       : config.telegramEnabled;
+    const nextTelegramApiBaseUrl = body.telegramApiBaseUrl !== undefined
+      ? normalizeTelegramApiBaseUrl(body.telegramApiBaseUrl)
+      : config.telegramApiBaseUrl;
     const nextTelegramBotToken = body.telegramBotToken !== undefined
       ? String(body.telegramBotToken || '').trim()
       : config.telegramBotToken;
@@ -473,6 +488,11 @@ export async function settingsRoutes(app: FastifyInstance) {
       if (!nextTelegramChatId) {
         return reply.code(400).send({ success: false, message: 'Telegram Chat ID 不能为空（启用 Telegram 时）' });
       }
+      if (nextTelegramApiBaseUrl && !isValidHttpUrl(nextTelegramApiBaseUrl)) {
+        return reply.code(400).send({ success: false, message: 'Telegram API Base URL 无效，请填写 http/https 地址' });
+      }
+    } else if (body.telegramApiBaseUrl !== undefined && nextTelegramApiBaseUrl && !isValidHttpUrl(nextTelegramApiBaseUrl)) {
+      return reply.code(400).send({ success: false, message: 'Telegram API Base URL 无效，请填写 http/https 地址' });
     }
 
     if (body.checkinCron !== undefined) {
@@ -637,6 +657,16 @@ export async function settingsRoutes(app: FastifyInstance) {
       }
       config.telegramEnabled = !!body.telegramEnabled;
       upsertSetting('telegram_enabled', config.telegramEnabled);
+    }
+
+    if (body.telegramApiBaseUrl !== undefined) {
+      const normalizedTelegramApiBaseUrl = normalizeTelegramApiBaseUrl(body.telegramApiBaseUrl);
+      const nextTelegramApiBaseUrl = normalizedTelegramApiBaseUrl || 'https://api.telegram.org';
+      if (nextTelegramApiBaseUrl !== config.telegramApiBaseUrl) {
+        changedLabels.push('Telegram API Base URL');
+      }
+      config.telegramApiBaseUrl = nextTelegramApiBaseUrl;
+      upsertSetting('telegram_api_base_url', config.telegramApiBaseUrl);
     }
 
     if (body.telegramBotToken !== undefined) {

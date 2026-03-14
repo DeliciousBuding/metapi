@@ -135,6 +135,17 @@ export type ProxyTestRequestEnvelope = {
   multipartFiles?: ProxyTestMultipartFile[];
 };
 
+const DEFAULT_PROXY_TEST_TIMEOUT_MS = 30_000;
+const LONG_RUNNING_PROXY_TEST_TIMEOUT_MS = 150_000;
+
+function resolveProxyTestTimeoutMs(data: ProxyTestRequestEnvelope) {
+  if (data.jobMode) return LONG_RUNNING_PROXY_TEST_TIMEOUT_MS;
+  if (data.path === '/v1/images/generations') return LONG_RUNNING_PROXY_TEST_TIMEOUT_MS;
+  if (data.path === '/v1/images/edits') return LONG_RUNNING_PROXY_TEST_TIMEOUT_MS;
+  if (data.path === '/v1/videos' && data.method === 'POST') return LONG_RUNNING_PROXY_TEST_TIMEOUT_MS;
+  return DEFAULT_PROXY_TEST_TIMEOUT_MS;
+}
+
 export type ProxyTestJobResponse = {
   jobId: string;
   status: 'pending' | 'succeeded' | 'failed' | 'cancelled';
@@ -425,13 +436,25 @@ export const api = {
   getTestChatJob: (jobId: string) => request(`/api/test/chat/jobs/${encodeURIComponent(jobId)}`),
   deleteTestChatJob: (jobId: string) => request(`/api/test/chat/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' }),
   startProxyTestJob: (data: ProxyTestRequestEnvelope) =>
-    request('/api/test/proxy/jobs', { method: 'POST', body: JSON.stringify(data) }),
+    request('/api/test/proxy/jobs', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      timeoutMs: resolveProxyTestTimeoutMs(data),
+    }),
   getProxyTestJob: (jobId: string) => request(`/api/test/proxy/jobs/${encodeURIComponent(jobId)}`),
   deleteProxyTestJob: (jobId: string) => request(`/api/test/proxy/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' }),
   testProxy: (data: ProxyTestRequestEnvelope) =>
-    request('/api/test/proxy', { method: 'POST', body: JSON.stringify(data) }),
+    request('/api/test/proxy', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      timeoutMs: resolveProxyTestTimeoutMs(data),
+    }),
   proxyTest: (data: ProxyTestRequestEnvelope) =>
-    request('/api/test/proxy', { method: 'POST', body: JSON.stringify(data) }),
+    request('/api/test/proxy', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      timeoutMs: resolveProxyTestTimeoutMs(data),
+    }),
   testChat: (data: TestChatRequestPayload) =>
     request('/api/test/chat', { method: 'POST', body: JSON.stringify(data) }),
   testProxyStream: async (data: ProxyTestRequestEnvelope, signal?: AbortSignal) => {

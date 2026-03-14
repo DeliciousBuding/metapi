@@ -175,6 +175,11 @@ function applyRuntimeSettings(settingsMap: Map<string, string>) {
   const telegramEnabled = parseSettingFromMap<boolean>(settingsMap, 'telegram_enabled');
   if (typeof telegramEnabled === 'boolean') config.telegramEnabled = telegramEnabled;
 
+  const telegramApiBaseUrl = parseSettingFromMap<string>(settingsMap, 'telegram_api_base_url');
+  if (typeof telegramApiBaseUrl === 'string' && telegramApiBaseUrl.trim()) {
+    config.telegramApiBaseUrl = telegramApiBaseUrl.trim().replace(/\/+$/, '');
+  }
+
   const telegramBotToken = parseSettingFromMap<string>(settingsMap, 'telegram_bot_token');
   if (typeof telegramBotToken === 'string') config.telegramBotToken = telegramBotToken;
 
