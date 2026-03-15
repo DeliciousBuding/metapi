@@ -496,6 +496,8 @@ function ensureDownstreamApiKeySchema() {
       name text NOT NULL,
       key text NOT NULL,
       description text,
+      group_name text,
+      tags text,
       enabled integer DEFAULT true,
       expires_at text,
       max_cost real,
@@ -527,6 +529,14 @@ function ensureDownstreamApiKeySchema() {
     CREATE INDEX IF NOT EXISTS downstream_api_keys_expires_at_idx
     ON downstream_api_keys(expires_at);
   `);
+
+  if (!tableColumnExists('downstream_api_keys', 'group_name')) {
+    execSqliteLegacyCompat('ALTER TABLE downstream_api_keys ADD COLUMN group_name text;');
+  }
+
+  if (!tableColumnExists('downstream_api_keys', 'tags')) {
+    execSqliteLegacyCompat('ALTER TABLE downstream_api_keys ADD COLUMN tags text;');
+  }
 }
 
 function ensureProxyLogBillingDetailsSchema() {

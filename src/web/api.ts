@@ -401,7 +401,14 @@ export const api = {
   deleteDownstreamApiKey: (id: number) => request(`/api/downstream-keys/${id}`, {
     method: 'DELETE',
   }),
-  batchDownstreamApiKeys: (data: { ids: number[]; action: 'enable' | 'disable' | 'delete' | 'resetUsage' }) =>
+  batchDownstreamApiKeys: (data: {
+    ids: number[];
+    action: 'enable' | 'disable' | 'delete' | 'resetUsage' | 'updateMetadata';
+    groupOperation?: 'keep' | 'set' | 'clear';
+    groupName?: string;
+    tagOperation?: 'keep' | 'append';
+    tags?: string[];
+  }) =>
     request('/api/downstream-keys/batch', {
       method: 'POST',
       body: JSON.stringify(data),

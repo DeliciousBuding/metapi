@@ -238,6 +238,8 @@ export const downstreamApiKeys = sqliteTable('downstream_api_keys', {
   name: text('name').notNull(),
   key: text('key').notNull(),
   description: text('description'),
+  groupName: text('group_name'),
+  tags: text('tags'), // JSON array<string>
   enabled: integer('enabled', { mode: 'boolean' }).default(true),
   expiresAt: text('expires_at'),
   maxCost: real('max_cost'),

@@ -60,6 +60,8 @@ const LEGACY_COMPAT_COLUMNS = new Set([
   'proxy_video_tasks.upstream_response_meta',
   'proxy_video_tasks.last_upstream_status',
   'proxy_video_tasks.last_polled_at',
+  'downstream_api_keys.group_name',
+  'downstream_api_keys.tags',
   'proxy_logs.billing_details',
   'proxy_logs.downstream_api_key_id',
 ]);
