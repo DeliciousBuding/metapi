@@ -85,6 +85,7 @@ jobs:
             let inspected = 0;
             let updated = 0;
             let skipped = 0;
+            let warned = 0;
 
             for (const pull of pulls) {
               if (inspected >= limit) {
@@ -92,6 +93,12 @@ jobs:
               }
 
               inspected += 1;
+
+              const { data: fullPull } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: pull.number,
+              });
 
               const files = await github.paginate(github.rest.pulls.listFiles, {
                 owner,
@@ -101,38 +108,50 @@ jobs:
               });
 
               const desiredAreaLabels = computeAreaLabels(files);
-              const desiredSizeLabel = computeSizeLabel(pull.additions + pull.deletions);
+              const totalChanges = fullPull.additions + fullPull.deletions;
+              const hasValidSizeData = Number.isFinite(totalChanges) && totalChanges >= 0;
               const currentLabels = pull.labels.map((label) => label.name);
               const missingAreaLabels = desiredAreaLabels.filter((label) => !currentLabels.includes(label));
               const currentSizeLabels = currentLabels.filter((label) => sizeLabels.includes(label));
-              const sizeMatches = currentSizeLabels.length === 1 && currentSizeLabels[0] === desiredSizeLabel;
+              const desiredSizeLabel = hasValidSizeData ? computeSizeLabel(totalChanges) : null;
+              const sizeMatches =
+                hasValidSizeData &&
+                currentSizeLabels.length === 1 &&
+                currentSizeLabels[0] === desiredSizeLabel;
 
-              if (missingAreaLabels.length === 0 && sizeMatches) {
+              if (!hasValidSizeData) {
+                warned += 1;
+                core.warning(`Skipping size label for PR #${pull.number}: invalid additions/deletions values.`);
+              }
+
+              if (missingAreaLabels.length === 0 && (hasValidSizeData ? sizeMatches : currentSizeLabels.length === 0)) {
                 skipped += 1;
                 continue;
               }
 
-              for (const label of currentSizeLabels) {
-                if (label === desiredSizeLabel) {
-                  continue;
-                }
+              if (hasValidSizeData) {
+                for (const label of currentSizeLabels) {
+                  if (label === desiredSizeLabel) {
+                    continue;
+                  }
 
-                try {
-                  await github.rest.issues.removeLabel({
-                    owner,
-                    repo,
-                    issue_number: pull.number,
-                    name: label,
-                  });
-                } catch (error) {
-                  if (error.status !== 404) {
-                    throw error;
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner,
+                      repo,
+                      issue_number: pull.number,
+                      name: label,
+                    });
+                  } catch (error) {
+                    if (error.status !== 404) {
+                      throw error;
+                    }
                   }
                 }
               }
 
               const labelsToAdd = [...missingAreaLabels];
-              if (!sizeMatches) {
+              if (hasValidSizeData && !sizeMatches) {
                 labelsToAdd.push(desiredSizeLabel);
               }
 
@@ -153,4 +172,5 @@ jobs:
               .addRaw(`Inspected PRs: ${inspected}\n`)
               .addRaw(`Updated PRs: ${updated}\n`)
               .addRaw(`Skipped PRs: ${skipped}\n`)
+              .addRaw(`Warnings: ${warned}\n`)
               .write();
