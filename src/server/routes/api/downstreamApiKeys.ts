@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { eq } from 'drizzle-orm';
-import { db, schema } from '../../db/index.js';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import { db, hasProxyLogDownstreamApiKeyIdColumn, runtimeDbDialect, schema } from '../../db/index.js';
 import {
   getDownstreamApiKeyById,
   listDownstreamApiKeys,
@@ -8,6 +8,7 @@ import {
   toDownstreamApiKeyPolicyView,
   toPersistenceJson,
 } from '../../services/downstreamApiKeyService.js';
+import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 
 function parseRouteId(raw: string): number | null {
   const id = Number.parseInt(raw, 10);
@@ -24,7 +25,271 @@ function looksLikeUniqueViolation(error: unknown): boolean {
   return message.includes('UNIQUE constraint failed') && message.includes('downstream_api_keys.key');
 }
 
+type DownstreamKeyRange = '24h' | '7d' | 'all';
+type DownstreamKeyStatus = 'all' | 'enabled' | 'disabled';
+
+function normalizeDownstreamKeyRange(raw: unknown): DownstreamKeyRange {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (value === '24h') return '24h';
+  if (value === '7d') return '7d';
+  if (value === 'all') return 'all';
+  return '24h';
+}
+
+function normalizeDownstreamKeyStatus(raw: unknown): DownstreamKeyStatus {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (value === 'enabled') return 'enabled';
+  if (value === 'disabled') return 'disabled';
+  return 'all';
+}
+
+function normalizeSearchQuery(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return '';
+  return value.slice(0, 80);
+}
+
+function resolveRangeSinceUtc(range: DownstreamKeyRange): string | null {
+  const nowTs = Date.now();
+  if (range === '24h') return formatUtcSqlDateTime(new Date(nowTs - 24 * 60 * 60 * 1000));
+  if (range === '7d') return formatUtcSqlDateTime(new Date(nowTs - 7 * 24 * 60 * 60 * 1000));
+  return null;
+}
+
+function resolveBucketSeconds(range: DownstreamKeyRange): number {
+  return range === 'all' ? 86400 : 3600;
+}
+
+function resolveBucketTsExpression(bucketSeconds: number) {
+  if (runtimeDbDialect === 'mysql') {
+    return sql<number>`floor(unix_timestamp(${schema.proxyLogs.createdAt}) / ${bucketSeconds}) * ${bucketSeconds}`;
+  }
+  if (runtimeDbDialect === 'postgres') {
+    if (bucketSeconds === 86400) {
+      return sql<number>`extract(epoch from date_trunc('day', ${schema.proxyLogs.createdAt}))::bigint`;
+    }
+    return sql<number>`extract(epoch from date_trunc('hour', ${schema.proxyLogs.createdAt}))::bigint`;
+  }
+  // sqlite
+  return sql<number>`cast(cast(strftime('%s', ${schema.proxyLogs.createdAt}) as integer) / ${bucketSeconds} as integer) * ${bucketSeconds}`;
+}
+
 export async function downstreamApiKeysRoutes(app: FastifyInstance) {
+  app.get<{ Querystring: { range?: string; status?: string; search?: string } }>('/api/downstream-keys/summary', async (request) => {
+    const range = normalizeDownstreamKeyRange(request.query?.range);
+    const status = normalizeDownstreamKeyStatus(request.query?.status);
+    const search = normalizeSearchQuery(request.query?.search);
+
+    const whereClauses = [];
+    if (status === 'enabled') {
+      whereClauses.push(eq(schema.downstreamApiKeys.enabled, true));
+    } else if (status === 'disabled') {
+      whereClauses.push(eq(schema.downstreamApiKeys.enabled, false));
+    }
+    if (search) {
+      const pattern = `%${search.toLowerCase()}%`;
+      whereClauses.push(sql`(lower(${schema.downstreamApiKeys.name}) like ${pattern} or lower(coalesce(${schema.downstreamApiKeys.description}, '')) like ${pattern})`);
+    }
+
+    let keysQuery = db.select().from(schema.downstreamApiKeys);
+    if (whereClauses.length > 0) {
+      keysQuery = keysQuery.where(and(...whereClauses));
+    }
+    const keys = (await keysQuery.all())
+      .map((row) => toDownstreamApiKeyPolicyView(row))
+      .sort((a, b) => b.id - a.id);
+
+    if (keys.length === 0) {
+      return { success: true, range, status, search, items: [] };
+    }
+
+    const columnReady = await hasProxyLogDownstreamApiKeyIdColumn();
+    const sinceUtc = resolveRangeSinceUtc(range);
+    const ids = keys.map((k) => k.id);
+
+    const usageRows = columnReady
+      ? await db.select({
+        keyId: schema.proxyLogs.downstreamApiKeyId,
+        totalRequests: sql<number>`count(*)`,
+        successRequests: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 1 else 0 end), 0)`,
+        failedRequests: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 0 else 1 end), 0)`,
+        totalTokens: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.totalTokens}, 0)), 0)`,
+        totalCost: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.estimatedCost}, 0)), 0)`,
+      })
+        .from(schema.proxyLogs)
+        .where(and(
+          inArray(schema.proxyLogs.downstreamApiKeyId, ids),
+          ...(sinceUtc ? [sql`${schema.proxyLogs.createdAt} >= ${sinceUtc}`] : []),
+        ))
+        .groupBy(schema.proxyLogs.downstreamApiKeyId)
+        .all()
+      : [];
+
+    const usageByKey = new Map<number, {
+      totalRequests: number;
+      successRequests: number;
+      failedRequests: number;
+      totalTokens: number;
+      totalCost: number;
+    }>();
+
+    for (const row of usageRows) {
+      const keyId = Number((row as any).keyId ?? 0);
+      if (!Number.isFinite(keyId) || keyId <= 0) continue;
+      usageByKey.set(keyId, {
+        totalRequests: Number((row as any).totalRequests || 0),
+        successRequests: Number((row as any).successRequests || 0),
+        failedRequests: Number((row as any).failedRequests || 0),
+        totalTokens: Number((row as any).totalTokens || 0),
+        totalCost: Number((row as any).totalCost || 0),
+      });
+    }
+
+    return {
+      success: true,
+      range,
+      status,
+      search,
+      items: keys.map((key) => {
+        const usage = usageByKey.get(key.id) || {
+          totalRequests: 0,
+          successRequests: 0,
+          failedRequests: 0,
+          totalTokens: 0,
+          totalCost: 0,
+        };
+        const successRate = usage.totalRequests > 0
+          ? Math.round((usage.successRequests / usage.totalRequests) * 1000) / 10
+          : null;
+        return {
+          ...key,
+          rangeUsage: {
+            totalRequests: usage.totalRequests,
+            successRequests: usage.successRequests,
+            failedRequests: usage.failedRequests,
+            successRate,
+            totalTokens: usage.totalTokens,
+            totalCost: Math.round(usage.totalCost * 1_000_000) / 1_000_000,
+          },
+        };
+      }),
+    };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/downstream-keys/:id/overview', async (request, reply) => {
+    const id = parseRouteId(request.params.id);
+    if (!id) {
+      return reply.code(400).send({ success: false, message: 'id 无效' });
+    }
+
+    const item = await getDownstreamApiKeyById(id);
+    if (!item) {
+      return reply.code(404).send({ success: false, message: 'API key 不存在' });
+    }
+
+    const columnReady = await hasProxyLogDownstreamApiKeyIdColumn();
+    if (!columnReady) {
+      return { success: true, item, usage: { last24h: null, last7d: null, all: null } };
+    }
+
+    const readAggregate = async (range: DownstreamKeyRange) => {
+      const sinceUtc = resolveRangeSinceUtc(range);
+      const row = await db.select({
+        totalRequests: sql<number>`count(*)`,
+        successRequests: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 1 else 0 end), 0)`,
+        failedRequests: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 0 else 1 end), 0)`,
+        totalTokens: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.totalTokens}, 0)), 0)`,
+        totalCost: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.estimatedCost}, 0)), 0)`,
+      })
+        .from(schema.proxyLogs)
+        .where(and(
+          eq(schema.proxyLogs.downstreamApiKeyId, id),
+          ...(sinceUtc ? [sql`${schema.proxyLogs.createdAt} >= ${sinceUtc}`] : []),
+        ))
+        .get();
+
+      const totalRequests = Number((row as any)?.totalRequests || 0);
+      const successRequests = Number((row as any)?.successRequests || 0);
+      const totalCost = Number((row as any)?.totalCost || 0);
+      return {
+        totalRequests,
+        successRequests,
+        failedRequests: Number((row as any)?.failedRequests || 0),
+        successRate: totalRequests > 0 ? Math.round((successRequests / totalRequests) * 1000) / 10 : null,
+        totalTokens: Number((row as any)?.totalTokens || 0),
+        totalCost: Math.round(totalCost * 1_000_000) / 1_000_000,
+      };
+    };
+
+    const [last24h, last7d, all] = await Promise.all([
+      readAggregate('24h'),
+      readAggregate('7d'),
+      readAggregate('all'),
+    ]);
+
+    return { success: true, item, usage: { last24h, last7d, all } };
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { range?: string } }>('/api/downstream-keys/:id/trend', async (request, reply) => {
+    const id = parseRouteId(request.params.id);
+    if (!id) {
+      return reply.code(400).send({ success: false, message: 'id 无效' });
+    }
+
+    const range = normalizeDownstreamKeyRange(request.query?.range);
+    const item = await getDownstreamApiKeyById(id);
+    if (!item) {
+      return reply.code(404).send({ success: false, message: 'API key 不存在' });
+    }
+
+    const columnReady = await hasProxyLogDownstreamApiKeyIdColumn();
+    if (!columnReady) {
+      return { success: true, range, item: { id: item.id, name: item.name }, buckets: [] };
+    }
+
+    const bucketSeconds = resolveBucketSeconds(range);
+    const bucketTs = resolveBucketTsExpression(bucketSeconds);
+    const sinceUtc = resolveRangeSinceUtc(range);
+
+    const rows = await db.select({
+      bucketTs,
+      totalRequests: sql<number>`count(*)`,
+      successRequests: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 1 else 0 end), 0)`,
+      failedRequests: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 0 else 1 end), 0)`,
+      totalTokens: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.totalTokens}, 0)), 0)`,
+      totalCost: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.estimatedCost}, 0)), 0)`,
+    })
+      .from(schema.proxyLogs)
+      .where(and(
+        eq(schema.proxyLogs.downstreamApiKeyId, id),
+        ...(sinceUtc ? [sql`${schema.proxyLogs.createdAt} >= ${sinceUtc}`] : []),
+      ))
+      .groupBy(bucketTs)
+      .orderBy(bucketTs)
+      .all();
+
+    return {
+      success: true,
+      range,
+      item: { id: item.id, name: item.name },
+      bucketSeconds,
+      buckets: rows.map((row: any) => {
+        const tsSeconds = Number(row.bucketTs || 0);
+        const totalRequests = Number(row.totalRequests || 0);
+        const successRequests = Number(row.successRequests || 0);
+        return {
+          startUtc: tsSeconds > 0 ? new Date(tsSeconds * 1000).toISOString() : null,
+          totalRequests,
+          successRequests,
+          failedRequests: Number(row.failedRequests || 0),
+          successRate: totalRequests > 0 ? Math.round((successRequests / totalRequests) * 1000) / 10 : null,
+          totalTokens: Number(row.totalTokens || 0),
+          totalCost: Math.round(Number(row.totalCost || 0) * 1_000_000) / 1_000_000,
+        };
+      }),
+    };
+  });
+
   app.get('/api/downstream-keys', async () => {
     return {
       success: true,
