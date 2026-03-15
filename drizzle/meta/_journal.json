@@ -57,6 +57,13 @@
       "when": 1773500500000,
       "tag": "0008_sqlite_schema_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1773528832339,
+      "tag": "0009_model_availability_is_manual",
+      "breakpoints": true
     }
   ]
 }
