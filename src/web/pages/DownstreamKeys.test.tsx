@@ -12,6 +12,7 @@ const { apiMock } = vi.hoisted(() => ({
     getDownstreamApiKeyOverview: vi.fn(),
     getDownstreamApiKeyTrend: vi.fn(),
     createDownstreamApiKey: vi.fn(),
+    batchDownstreamApiKeys: vi.fn(),
     updateDownstreamApiKey: vi.fn(),
     deleteDownstreamApiKey: vi.fn(),
     resetDownstreamApiKeyUsage: vi.fn(),
@@ -111,6 +112,7 @@ function buildRawItem(overrides?: Partial<any>) {
     usedRequests: 0,
     supportedModels: ['gpt-4.1-mini'],
     allowedRouteIds: [11],
+    siteWeightMultipliers: {},
     lastUsedAt: '2026-03-15T08:27:25.378Z',
     ...overrides,
   };
@@ -146,6 +148,7 @@ beforeEach(() => {
     ],
   });
   apiMock.createDownstreamApiKey.mockResolvedValue({ success: true });
+  apiMock.batchDownstreamApiKeys.mockResolvedValue({ success: true, successIds: [1], failedItems: [] });
   apiMock.updateDownstreamApiKey.mockResolvedValue({ success: true });
   apiMock.deleteDownstreamApiKey.mockResolvedValue({ success: true });
   apiMock.resetDownstreamApiKeyUsage.mockResolvedValue({ success: true });
@@ -273,6 +276,7 @@ describe('DownstreamKeys page', () => {
       expect(apiMock.createDownstreamApiKey).toHaveBeenCalledWith(expect.objectContaining({
         name: 'new-key',
         key: 'sk-new-key-0315',
+        siteWeightMultipliers: {},
       }));
 
       const row = root!.root.findAll((node) => node.type === 'tr' && typeof node.props.onClick === 'function')[0];
@@ -284,6 +288,41 @@ describe('DownstreamKeys page', () => {
       expect(apiMock.getDownstreamApiKeyOverview).toHaveBeenCalledWith(1);
       expect(apiMock.getDownstreamApiKeyTrend).toHaveBeenCalledWith(1, { range: '24h' });
       expect(collectText(root!.root)).toContain('trend:2');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('uses backend batch api for selected rows', async () => {
+    let root: ReturnType<typeof create> | null = null;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/downstream-keys']}>
+            <ToastProvider>
+              <DownstreamKeys />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const checkbox = root!.root.findAllByType('input').find((node) => node.props.type === 'checkbox' && typeof node.props.onChange === 'function' && node.props.checked === false);
+      await act(async () => {
+        checkbox!.props.onChange({ target: { checked: true } });
+      });
+      await flushMicrotasks();
+
+      const batchButton = root!.root.findAll((node) => node.type === 'button' && collectText(node).includes('批量启用'))[0];
+      await act(async () => {
+        batchButton.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.batchDownstreamApiKeys).toHaveBeenCalledWith({
+        ids: [1],
+        action: 'enable',
+      });
     } finally {
       root?.unmount();
     }

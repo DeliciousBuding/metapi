@@ -127,6 +127,106 @@ describe('downstream api keys routes', () => {
     expect(listRes.json()).toMatchObject({ success: true, items: [] });
   });
 
+  it('supports batch enable/disable/reset/delete operations', async () => {
+    const inserted = await db.insert(schema.downstreamApiKeys).values([
+      {
+        name: 'batch-a',
+        key: 'sk-batch-a-001',
+        enabled: true,
+        usedCost: 1.2,
+        usedRequests: 12,
+      },
+      {
+        name: 'batch-b',
+        key: 'sk-batch-b-001',
+        enabled: false,
+        usedCost: 2.4,
+        usedRequests: 24,
+      },
+    ]).returning().all();
+
+    const disableRes = await app.inject({
+      method: 'POST',
+      url: '/api/downstream-keys/batch',
+      payload: {
+        ids: [inserted[0].id, inserted[1].id],
+        action: 'disable',
+      },
+    });
+    expect(disableRes.statusCode).toBe(200);
+    expect(disableRes.json()).toMatchObject({
+      success: true,
+      successIds: [inserted[0].id, inserted[1].id],
+      failedItems: [],
+    });
+
+    const disabledRows = await db.select().from(schema.downstreamApiKeys).all();
+    expect(disabledRows.every((row) => row.enabled === false)).toBe(true);
+
+    const resetRes = await app.inject({
+      method: 'POST',
+      url: '/api/downstream-keys/batch',
+      payload: {
+        ids: [inserted[0].id, inserted[1].id],
+        action: 'resetUsage',
+      },
+    });
+    expect(resetRes.statusCode).toBe(200);
+    const resetRows = await db.select().from(schema.downstreamApiKeys).all();
+    expect(resetRows.every((row) => Number(row.usedCost) === 0 && Number(row.usedRequests) === 0)).toBe(true);
+
+    const deleteRes = await app.inject({
+      method: 'POST',
+      url: '/api/downstream-keys/batch',
+      payload: {
+        ids: [inserted[0].id, inserted[1].id],
+        action: 'delete',
+      },
+    });
+    expect(deleteRes.statusCode).toBe(200);
+    expect(await db.select().from(schema.downstreamApiKeys).all()).toHaveLength(0);
+  });
+
+  it('rejects duplicate key creation and invalid batch action', async () => {
+    const firstRes = await app.inject({
+      method: 'POST',
+      url: '/api/downstream-keys',
+      payload: {
+        name: 'dup-a',
+        key: 'sk-dup-key-001',
+      },
+    });
+    expect(firstRes.statusCode).toBe(200);
+
+    const duplicateRes = await app.inject({
+      method: 'POST',
+      url: '/api/downstream-keys',
+      payload: {
+        name: 'dup-b',
+        key: 'sk-dup-key-001',
+      },
+    });
+    expect(duplicateRes.statusCode).toBe(409);
+    expect(duplicateRes.json()).toMatchObject({
+      success: false,
+      message: 'API key 已存在',
+    });
+
+    const invalidBatchRes = await app.inject({
+      method: 'POST',
+      url: '/api/downstream-keys/batch',
+      payload: {
+        ids: [999],
+        action: 'archive',
+      },
+    });
+    expect(invalidBatchRes.statusCode).toBe(400);
+    expect(invalidBatchRes.json()).toMatchObject({
+      success: false,
+      message: 'Invalid action',
+    });
+  });
+
   it('returns summary, overview and trend aggregated from proxy logs', async () => {
     const inserted = await db.insert(schema.downstreamApiKeys).values({
       name: 'analytics-key',
