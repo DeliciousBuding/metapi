@@ -1432,7 +1432,7 @@ export async function accountsRoutes(app: FastifyInstance) {
     }
 
     try {
-      await db.transaction(async (tx: any) => {
+      await db.transaction(async (tx) => {
         for (const modelName of normalizedModels) {
           const existing = await tx.select()
             .from(schema.modelAvailability)
