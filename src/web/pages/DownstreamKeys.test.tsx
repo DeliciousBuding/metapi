@@ -7,14 +7,18 @@ import DownstreamKeys from './DownstreamKeys.js';
 const { apiMock } = vi.hoisted(() => ({
   apiMock: {
     getDownstreamApiKeysSummary: vi.fn(),
+    getDownstreamApiKeys: vi.fn(),
+    getRoutesLite: vi.fn(),
     getDownstreamApiKeyOverview: vi.fn(),
     getDownstreamApiKeyTrend: vi.fn(),
+    createDownstreamApiKey: vi.fn(),
+    updateDownstreamApiKey: vi.fn(),
+    deleteDownstreamApiKey: vi.fn(),
+    resetDownstreamApiKeyUsage: vi.fn(),
   },
 }));
 
-vi.mock('../api.js', () => ({
-  api: apiMock,
-}));
+vi.mock('../api.js', () => ({ api: apiMock }));
 
 vi.mock('react-dom', async () => {
   const actual = await vi.importActual<typeof import('react-dom')>('react-dom');
@@ -38,15 +42,7 @@ vi.mock('../components/charts/DownstreamKeyTrendChart.js', () => ({
 }));
 
 vi.mock('../components/ModernSelect.js', () => ({
-  default: ({
-    value,
-    onChange,
-    options,
-  }: {
-    value: string;
-    onChange: (value: string) => void;
-    options: Array<{ value: string; label: string }>;
-  }) => (
+  default: ({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) => (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
       {options.map((option) => (
         <option key={option.value} value={option.value}>{option.label}</option>
@@ -82,10 +78,10 @@ function buildSummaryItem(overrides?: Partial<any>) {
     usedCost: 0,
     maxRequests: null,
     usedRequests: 0,
-    supportedModels: [],
-    allowedRouteIds: [],
+    supportedModels: ['gpt-4.1-mini'],
+    allowedRouteIds: [11],
     siteWeightMultipliers: {},
-    lastUsedAt: null,
+    lastUsedAt: '2026-03-15T08:27:25.378Z',
     createdAt: '2026-03-15T08:27:25.378Z',
     updatedAt: '2026-03-15T08:27:25.378Z',
     rangeUsage: {
@@ -100,40 +96,69 @@ function buildSummaryItem(overrides?: Partial<any>) {
   };
 }
 
+function buildRawItem(overrides?: Partial<any>) {
+  return {
+    id: 1,
+    name: 'smoke-key',
+    key: 'sk-smoke-0315',
+    keyMasked: 'sk-s****0315',
+    description: 'local smoke',
+    enabled: true,
+    expiresAt: null,
+    maxCost: null,
+    usedCost: 0,
+    maxRequests: null,
+    usedRequests: 0,
+    supportedModels: ['gpt-4.1-mini'],
+    allowedRouteIds: [11],
+    lastUsedAt: '2026-03-15T08:27:25.378Z',
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  (globalThis as any).document = {
+    body: { style: {} },
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
+  apiMock.getDownstreamApiKeysSummary.mockResolvedValue({ success: true, items: [buildSummaryItem()] });
+  apiMock.getDownstreamApiKeys.mockResolvedValue({ success: true, items: [buildRawItem()] });
+  apiMock.getRoutesLite.mockResolvedValue([
+    { id: 11, modelPattern: 'team/default', displayName: '默认群组', enabled: true },
+    { id: 12, modelPattern: 'gpt-4.1-mini', displayName: 'GPT 4.1 Mini', enabled: true },
+  ]);
+  apiMock.getDownstreamApiKeyOverview.mockResolvedValue({
+    success: true,
+    item: buildSummaryItem(),
+    usage: {
+      last24h: { totalRequests: 3, successRequests: 2, failedRequests: 1, successRate: 66.7, totalTokens: 4200, totalCost: 0.42 },
+      last7d: { totalRequests: 9, successRequests: 8, failedRequests: 1, successRate: 88.9, totalTokens: 12400, totalCost: 1.24 },
+      all: { totalRequests: 20, successRequests: 18, failedRequests: 2, successRate: 90, totalTokens: 55200, totalCost: 5.52 },
+    },
+  });
+  apiMock.getDownstreamApiKeyTrend.mockResolvedValue({
+    success: true,
+    buckets: [
+      { startUtc: '2026-03-15T08:00:00.000Z', totalRequests: 2, totalTokens: 1200, totalCost: 0.12, successRate: 100 },
+      { startUtc: '2026-03-15T09:00:00.000Z', totalRequests: 1, totalTokens: 3000, totalCost: 0.3, successRate: 0 },
+    ],
+  });
+  apiMock.createDownstreamApiKey.mockResolvedValue({ success: true });
+  apiMock.updateDownstreamApiKey.mockResolvedValue({ success: true });
+  apiMock.deleteDownstreamApiKey.mockResolvedValue({ success: true });
+  apiMock.resetDownstreamApiKeyUsage.mockResolvedValue({ success: true });
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+  delete (globalThis as any).document;
+});
+
 describe('DownstreamKeys page', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    (globalThis as any).document = { body: {} };
-    apiMock.getDownstreamApiKeysSummary.mockResolvedValue({
-      success: true,
-      items: [buildSummaryItem()],
-    });
-    apiMock.getDownstreamApiKeyOverview.mockResolvedValue({
-      success: true,
-      item: buildSummaryItem(),
-      usage: {
-        last24h: { totalRequests: 3, successRequests: 2, failedRequests: 1, successRate: 66.7, totalTokens: 4200, totalCost: 0.42 },
-        last7d: { totalRequests: 9, successRequests: 8, failedRequests: 1, successRate: 88.9, totalTokens: 12400, totalCost: 1.24 },
-        all: { totalRequests: 20, successRequests: 18, failedRequests: 2, successRate: 90, totalTokens: 55200, totalCost: 5.52 },
-      },
-    });
-    apiMock.getDownstreamApiKeyTrend.mockResolvedValue({
-      success: true,
-      buckets: [
-        { startUtc: '2026-03-15T08:00:00.000Z', totalRequests: 2, totalTokens: 1200, totalCost: 0.12, successRate: 100 },
-        { startUtc: '2026-03-15T09:00:00.000Z', totalRequests: 1, totalTokens: 3000, totalCost: 0.3, successRate: 0 },
-      ],
-    });
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
-    delete (globalThis as any).document;
-  });
-
-  it('loads summary rows and renders range usage data', async () => {
+  it('loads management data and renders merged row content', async () => {
     let root: ReturnType<typeof create> | null = null;
-
     try {
       await act(async () => {
         root = create(
@@ -146,25 +171,38 @@ describe('DownstreamKeys page', () => {
       });
       await flushMicrotasks();
 
-      expect(apiMock.getDownstreamApiKeysSummary).toHaveBeenCalledWith({
-        range: '24h',
-        status: 'all',
-        search: undefined,
-      });
+      expect(apiMock.getDownstreamApiKeysSummary).toHaveBeenCalledWith({ range: '24h' });
+      expect(apiMock.getDownstreamApiKeys).toHaveBeenCalled();
+      expect(apiMock.getRoutesLite).toHaveBeenCalled();
 
       const text = collectText(root!.root);
+      expect(text).toContain('下游密钥');
       expect(text).toContain('smoke-key');
       expect(text).toContain('sk-s****0315');
+      expect(text).toContain('默认群组');
       expect(text).toContain('4.2K');
-      expect(text).toContain('$0.420000');
     } finally {
       root?.unmount();
     }
   });
 
-  it('re-queries summary when search and status change', async () => {
-    let root: ReturnType<typeof create> | null = null;
+  it('filters rows locally by search and status', async () => {
+    apiMock.getDownstreamApiKeysSummary.mockResolvedValue({
+      success: true,
+      items: [
+        buildSummaryItem(),
+        buildSummaryItem({ id: 2, name: 'batch-key', enabled: false, description: 'other project', keyMasked: 'sk-b****0315' }),
+      ],
+    });
+    apiMock.getDownstreamApiKeys.mockResolvedValue({
+      success: true,
+      items: [
+        buildRawItem(),
+        buildRawItem({ id: 2, name: 'batch-key', enabled: false, description: 'other project', key: 'sk-batch-0315', keyMasked: 'sk-b****0315', supportedModels: ['gpt-4o-mini'], allowedRouteIds: [] }),
+      ],
+    });
 
+    let root: ReturnType<typeof create> | null = null;
     try {
       await act(async () => {
         root = create(
@@ -177,31 +215,28 @@ describe('DownstreamKeys page', () => {
       });
       await flushMicrotasks();
 
-      const input = root!.root.findAllByType('input')[0];
+      const input = root!.root.findAllByType('input').find((node) => node.props.placeholder === '搜索名称、备注、模型或群组');
       await act(async () => {
-        input.props.onChange({ target: { value: 'smoke' } });
+        input!.props.onChange({ target: { value: 'batch' } });
       });
       await flushMicrotasks();
+      expect(collectText(root!.root)).toContain('batch-key');
+      expect(collectText(root!.root)).not.toContain('smoke-key');
 
       const select = root!.root.findByType('select');
       await act(async () => {
-        select.props.onChange({ target: { value: 'enabled' } });
+        select.props.onChange({ target: { value: 'disabled' } });
       });
       await flushMicrotasks();
-
-      expect(apiMock.getDownstreamApiKeysSummary).toHaveBeenLastCalledWith({
-        range: '24h',
-        status: 'enabled',
-        search: 'smoke',
-      });
+      expect(collectText(root!.root)).toContain('batch-key');
+      expect(collectText(root!.root)).not.toContain('smoke-key');
     } finally {
       root?.unmount();
     }
   });
 
-  it('opens drawer and loads overview plus trend for selected key', async () => {
+  it('supports create flow and drawer trend loading', async () => {
     let root: ReturnType<typeof create> | null = null;
-
     try {
       await act(async () => {
         root = create(
@@ -214,11 +249,33 @@ describe('DownstreamKeys page', () => {
       });
       await flushMicrotasks();
 
-      const row = root!.root.findAll((node) => (
-        node.type === 'tr'
-        && typeof node.props.onClick === 'function'
-      ))[0];
+      const createBtn = root!.root.findAll((node) => node.type === 'button' && collectText(node).includes('新增下游密钥'))[0];
+      await act(async () => {
+        createBtn.props.onClick();
+      });
+      await flushMicrotasks();
 
+      const inputs = root!.root.findAllByType('input');
+      const nameInput = inputs.find((node) => node.props.placeholder === '例如：项目 A / 移动端');
+      const keyInput = inputs.find((node) => node.props.placeholder === 'sk-...');
+      await act(async () => {
+        nameInput!.props.onChange({ target: { value: 'new-key' } });
+        keyInput!.props.onChange({ target: { value: 'sk-new-key-0315' } });
+      });
+      await flushMicrotasks();
+
+      const saveBtn = root!.root.findAll((node) => node.type === 'button' && collectText(node).includes('创建密钥'))[0];
+      await act(async () => {
+        saveBtn.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.createDownstreamApiKey).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'new-key',
+        key: 'sk-new-key-0315',
+      }));
+
+      const row = root!.root.findAll((node) => node.type === 'tr' && typeof node.props.onClick === 'function')[0];
       await act(async () => {
         row.props.onClick();
       });
@@ -226,23 +283,7 @@ describe('DownstreamKeys page', () => {
 
       expect(apiMock.getDownstreamApiKeyOverview).toHaveBeenCalledWith(1);
       expect(apiMock.getDownstreamApiKeyTrend).toHaveBeenCalledWith(1, { range: '24h' });
-
-      const buttons = root!.root.findAll((node) => node.type === 'button');
-      const trendToggle = buttons.find((button) => collectText(button) === '7d');
-      expect(trendToggle).toBeTruthy();
-
-      await act(async () => {
-        trendToggle!.props.onClick();
-      });
-      await flushMicrotasks();
-
-      expect(apiMock.getDownstreamApiKeyTrend).toHaveBeenLastCalledWith(1, { range: '7d' });
-
-      const text = collectText(root!.root);
-      expect(text).toContain('smoke-key');
-      expect(text).toContain('trend:2');
-      expect(text).toContain('24h');
-      expect(text).toContain('7d');
+      expect(collectText(root!.root)).toContain('trend:2');
     } finally {
       root?.unmount();
     }

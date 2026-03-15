@@ -14,7 +14,7 @@ describe('App sidebar config', () => {
   it('places downstream key navigation under 控制台 instead of 系统', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/web/App.tsx'), 'utf8');
     const consoleGroupIndex = source.indexOf("label: '控制台'");
-    const downstreamIndex = source.indexOf("{ to: '/downstream-keys', label: '下游 Key'");
+    const downstreamIndex = source.indexOf("{ to: '/downstream-keys', label: '下游密钥'");
     const systemGroupIndex = source.indexOf("label: '系统'");
 
     expect(consoleGroupIndex).toBeGreaterThanOrEqual(0);
