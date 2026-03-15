@@ -107,6 +107,13 @@ describe('schema artifact generator', () => {
     expect(artifacts.postgresBootstrap).toContain('"created_at" TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
   });
 
+  it('uses varchar for mysql text primary keys so bootstrap ddl stays executable', () => {
+    const artifacts = generateDialectArtifacts(readSchemaContract());
+
+    expect(artifacts.mysqlBootstrap).toContain('CREATE TABLE IF NOT EXISTS `settings` (`key` VARCHAR(191) NOT NULL PRIMARY KEY, `value` TEXT)');
+    expect(artifacts.mysqlBootstrap).not.toContain('CREATE TABLE IF NOT EXISTS `settings` (`key` TEXT NOT NULL PRIMARY KEY, `value` TEXT)');
+  });
+
   it('rejects destructive diffs when generating additive upgrades', () => {
     const current = readSchemaContract();
     const previous = structuredClone(current);
