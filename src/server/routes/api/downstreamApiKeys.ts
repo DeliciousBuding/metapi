@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { db, hasProxyLogDownstreamApiKeyIdColumn, runtimeDbDialect, schema } from '../../db/index.js';
 import {
   getDownstreamApiKeyById,
@@ -80,7 +80,7 @@ export async function downstreamApiKeysRoutes(app: FastifyInstance) {
     const status = normalizeDownstreamKeyStatus(request.query?.status);
     const search = normalizeSearchQuery(request.query?.search);
 
-    const whereClauses = [];
+    const whereClauses: SQL[] = [];
     if (status === 'enabled') {
       whereClauses.push(eq(schema.downstreamApiKeys.enabled, true));
     } else if (status === 'disabled') {
@@ -443,7 +443,7 @@ export async function downstreamApiKeysRoutes(app: FastifyInstance) {
         updatedAt: nowIso,
       }).where(eq(schema.downstreamApiKeys.id, id)).run();
 
-      const updated = getDownstreamApiKeyById(id);
+      const updated = await getDownstreamApiKeyById(id);
       return {
         success: true,
         item: updated,
@@ -462,7 +462,7 @@ export async function downstreamApiKeysRoutes(app: FastifyInstance) {
       return reply.code(400).send({ success: false, message: 'id 无效' });
     }
 
-    const existing = getDownstreamApiKeyById(id);
+    const existing = await getDownstreamApiKeyById(id);
     if (!existing) {
       return reply.code(404).send({ success: false, message: 'API key 不存在' });
     }
@@ -475,7 +475,7 @@ export async function downstreamApiKeysRoutes(app: FastifyInstance) {
 
     return {
       success: true,
-      item: getDownstreamApiKeyById(id),
+      item: await getDownstreamApiKeyById(id),
     };
   });
 
@@ -485,7 +485,7 @@ export async function downstreamApiKeysRoutes(app: FastifyInstance) {
       return reply.code(400).send({ success: false, message: 'id 无效' });
     }
 
-    const existing = getDownstreamApiKeyById(id);
+    const existing = await getDownstreamApiKeyById(id);
     if (!existing) {
       return reply.code(404).send({ success: false, message: 'API key 不存在' });
     }

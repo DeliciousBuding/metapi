@@ -345,6 +345,7 @@ async function handleChatProxyRequest(
             estimatedCost,
             billingDetails,
             successfulUpstreamPath,
+            clientContext,
             logDownstreamApiKeyId ? downstreamApiKeyId : null,
           );
           return;
@@ -395,6 +396,7 @@ async function handleChatProxyRequest(
           estimatedCost,
           billingDetails,
           successfulUpstreamPath,
+          clientContext,
           logDownstreamApiKeyId ? downstreamApiKeyId : null,
         );
         return;
@@ -454,6 +456,7 @@ async function handleChatProxyRequest(
         estimatedCost,
         billingDetails,
         successfulUpstreamPath,
+        clientContext,
         logDownstreamApiKeyId ? downstreamApiKeyId : null,
       );
 

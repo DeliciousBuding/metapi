@@ -410,6 +410,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
             selected, requestedModel, 'success', 200, latency, null, retryCount, downstreamPath,
             resolvedUsage.promptTokens, resolvedUsage.completionTokens, resolvedUsage.totalTokens, estimatedCost, billingDetails,
             successfulUpstreamPath,
+            clientContext,
             logDownstreamApiKeyId ? downstreamApiKeyId : null,
           );
           return;
@@ -464,6 +465,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
           selected, requestedModel, 'success', 200, latency, null, retryCount, downstreamPath,
           resolvedUsage.promptTokens, resolvedUsage.completionTokens, resolvedUsage.totalTokens, estimatedCost, billingDetails,
           successfulUpstreamPath,
+          clientContext,
           logDownstreamApiKeyId ? downstreamApiKeyId : null,
         );
         return reply.send(downstreamData);
