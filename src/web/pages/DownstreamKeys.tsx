@@ -72,6 +72,7 @@ type DownstreamApiKeyItem = {
   usedRequests: number;
   supportedModels: string[];
   allowedRouteIds: number[];
+  siteWeightMultipliers: Record<number, number>;
   lastUsedAt: string | null;
 };
 
@@ -96,6 +97,7 @@ type EditorForm = {
   enabled: boolean;
   selectedModels: string[];
   selectedGroupRouteIds: number[];
+  siteWeightMultipliersText: string;
 };
 
 type DeleteConfirmState =
@@ -170,6 +172,7 @@ function buildEditorForm(item?: ManagedItem | DownstreamApiKeyItem | null): Edit
     enabled: item?.enabled ?? true,
     selectedModels: uniqStrings(Array.isArray(item?.supportedModels) ? item!.supportedModels : []),
     selectedGroupRouteIds: uniqIds(Array.isArray(item?.allowedRouteIds) ? item!.allowedRouteIds : []),
+    siteWeightMultipliersText: JSON.stringify(item?.siteWeightMultipliers || {}, null, 2),
   };
 }
 
@@ -188,6 +191,13 @@ function summarizeRouteLimit(routeIds: number[], routeMap: Map<number, RouteSele
   if (names.length === 0) return `${routeIds.length} 个群组`;
   if (names.length === 1) return names[0];
   return `${names[0]} +${names.length - 1}`;
+}
+
+function summarizeSiteWeightMultipliers(weights: Record<number, number> | undefined): string {
+  const entries = Object.entries(weights || {});
+  if (entries.length === 0) return '默认倍率';
+  if (entries.length === 1) return `${entries[0][0]} => ${entries[0][1]}`;
+  return `${entries[0][0]} => ${entries[0][1]} +${entries.length - 1}`;
 }
 
 function RangeToggle({ range, onChange }: { range: Range; onChange: (r: Range) => void }) {
@@ -591,6 +601,17 @@ function EditorModal({
         />
       </div>
 
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>站点倍率 JSON</div>
+        <textarea
+          value={form.siteWeightMultipliersText}
+          onChange={(e) => onChange((prev) => ({ ...prev, siteWeightMultipliersText: e.target.value }))}
+          placeholder={'例如：{\n  "1": 1.2,\n  "7": 0.8\n}'}
+          style={{ ...inputStyle, minHeight: 96, resize: 'vertical', fontFamily: 'var(--font-mono)' }}
+        />
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>用于对特定站点做分发倍率微调；留空或 `{}` 表示走默认倍率。</div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12 }}>
         <div style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -750,6 +771,7 @@ export default function DownstreamKeys() {
         usedRequests: raw?.usedRequests ?? item.usedRequests,
         supportedModels: raw?.supportedModels ?? item.supportedModels,
         allowedRouteIds: raw?.allowedRouteIds ?? item.allowedRouteIds,
+        siteWeightMultipliers: raw?.siteWeightMultipliers ?? item.siteWeightMultipliers,
         lastUsedAt: raw?.lastUsedAt ?? item.lastUsedAt,
       };
     })
@@ -851,6 +873,26 @@ export default function DownstreamKeys() {
       return;
     }
 
+    let siteWeightMultipliers: Record<number, number> = {};
+    const rawWeights = editorForm.siteWeightMultipliersText.trim();
+    if (rawWeights && rawWeights !== '{}') {
+      try {
+        const parsed = JSON.parse(rawWeights);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          toast.info('站点倍率必须是 JSON 对象');
+          return;
+        }
+        siteWeightMultipliers = Object.fromEntries(
+          Object.entries(parsed)
+            .map(([siteId, value]) => [Math.trunc(Number(siteId)), Number(value)])
+            .filter(([siteId, value]) => Number.isFinite(siteId) && siteId > 0 && Number.isFinite(value) && value > 0),
+        ) as Record<number, number>;
+      } catch {
+        toast.info('站点倍率 JSON 解析失败');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -863,6 +905,7 @@ export default function DownstreamKeys() {
         maxRequests: editorForm.maxRequests.trim() ? Number(editorForm.maxRequests.trim()) : null,
         supportedModels: uniqStrings(editorForm.selectedModels),
         allowedRouteIds: uniqIds(editorForm.selectedGroupRouteIds),
+        siteWeightMultipliers,
       };
       if (editingId) {
         await api.updateDownstreamApiKey(editingId, payload);
@@ -892,13 +935,24 @@ export default function DownstreamKeys() {
     setSelectedIds((current) => uniqIds([...current, ...visibleIds]));
   };
 
-  const batchRun = async (label: string, ids: number[], action: (id: number) => Promise<void>) => {
+  const batchRun = async (label: string, ids: number[]) => {
     if (ids.length === 0) return;
     setBatchActionLoading(true);
     try {
-      const results = await Promise.allSettled(ids.map((id) => action(id)));
-      const failedIds = results.map((result, index) => ({ result, id: ids[index] })).filter((item) => item.result.status === 'rejected').map((item) => item.id);
-      const successCount = ids.length - failedIds.length;
+      const result = await api.batchDownstreamApiKeys({
+        ids,
+        action: label === '批量启用'
+          ? 'enable'
+          : label === '批量禁用'
+            ? 'disable'
+            : label === '批量删除'
+              ? 'delete'
+              : 'resetUsage',
+      });
+      const successIds = Array.isArray(result?.successIds) ? result.successIds.map((id: unknown) => Number(id)) : [];
+      const failedItems = Array.isArray(result?.failedItems) ? result.failedItems : [];
+      const failedIds = failedItems.map((item: any) => Number(item.id)).filter((id: number) => Number.isFinite(id) && id > 0);
+      const successCount = successIds.length;
       if (failedIds.length > 0) {
         toast.info(`${label}完成：成功 ${successCount}，失败 ${failedIds.length}`);
       } else {
@@ -943,7 +997,7 @@ export default function DownstreamKeys() {
       return;
     }
 
-    await batchRun('批量删除', target.ids, (id) => api.deleteDownstreamApiKey(id));
+    await batchRun('批量删除', target.ids);
   };
 
   const empty = !loading && visibleItems.length === 0;
@@ -1006,9 +1060,9 @@ export default function DownstreamKeys() {
         {selectedIds.length > 0 ? (
           <div className="card" style={{ padding: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: 'color-mix(in srgb, var(--color-primary) 6%, var(--color-bg-card))' }}>
             <span style={{ fontSize: 13, fontWeight: 700 }}>已选 {selectedIds.length} 个密钥</span>
-            <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量启用', selectedIds, (id) => api.updateDownstreamApiKey(id, { enabled: true }))} disabled={batchActionLoading}>批量启用</button>
-            <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量禁用', selectedIds, (id) => api.updateDownstreamApiKey(id, { enabled: false }))} disabled={batchActionLoading}>批量禁用</button>
-            <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量清零用量', selectedIds, (id) => api.resetDownstreamApiKeyUsage(id))} disabled={batchActionLoading}>批量清零用量</button>
+            <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量启用', selectedIds)} disabled={batchActionLoading}>批量启用</button>
+            <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量禁用', selectedIds)} disabled={batchActionLoading}>批量禁用</button>
+            <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量清零用量', selectedIds)} disabled={batchActionLoading}>批量清零用量</button>
             <button className="btn btn-link btn-link-danger" onClick={() => setDeleteConfirm({ mode: 'batch', ids: [...selectedIds] })} disabled={batchActionLoading}>批量删除</button>
           </div>
         ) : null}
@@ -1059,6 +1113,7 @@ export default function DownstreamKeys() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                           <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>模型：<span style={{ color: 'var(--color-text-primary)' }}>{summarizeModelLimit(row.supportedModels || [])}</span></div>
                           <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>群组：<span style={{ color: 'var(--color-text-primary)' }}>{summarizeRouteLimit(row.allowedRouteIds || [], routeMap)}</span></div>
+                          <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>倍率：<span style={{ color: 'var(--color-text-primary)' }}>{summarizeSiteWeightMultipliers(row.siteWeightMultipliers || {})}</span></div>
                         </div>
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>

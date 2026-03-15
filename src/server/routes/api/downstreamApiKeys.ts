@@ -25,6 +25,20 @@ function looksLikeUniqueViolation(error: unknown): boolean {
   return message.includes('UNIQUE constraint failed') && message.includes('downstream_api_keys.key');
 }
 
+function normalizeBatchIds(raw: unknown): number[] {
+  const values = Array.isArray(raw) ? raw : [];
+  const ids: number[] = [];
+  for (const item of values) {
+    const parsed = Number(item);
+    if (!Number.isFinite(parsed)) continue;
+    const id = Math.trunc(parsed);
+    if (id <= 0 || ids.includes(id)) continue;
+    ids.push(id);
+    if (ids.length >= 500) break;
+  }
+  return ids;
+}
+
 type DownstreamKeyRange = '24h' | '7d' | 'all';
 type DownstreamKeyStatus = 'all' | 'enabled' | 'disabled';
 
@@ -495,5 +509,56 @@ export async function downstreamApiKeysRoutes(app: FastifyInstance) {
       .run();
 
     return { success: true };
+  });
+
+  app.post<{ Body?: { ids?: number[]; action?: string } }>('/api/downstream-keys/batch', async (request, reply) => {
+    const ids = normalizeBatchIds(request.body?.ids);
+    const action = String(request.body?.action || '').trim();
+    if (ids.length === 0) {
+      return reply.code(400).send({ success: false, message: 'ids is required' });
+    }
+    if (!['enable', 'disable', 'delete', 'resetUsage'].includes(action)) {
+      return reply.code(400).send({ success: false, message: 'Invalid action' });
+    }
+
+    const successIds: number[] = [];
+    const failedItems: Array<{ id: number; message: string }> = [];
+
+    for (const id of ids) {
+      try {
+        const existing = await getDownstreamApiKeyById(id);
+        if (!existing) {
+          failedItems.push({ id, message: 'API key 不存在' });
+          continue;
+        }
+
+        if (action === 'delete') {
+          await db.delete(schema.downstreamApiKeys)
+            .where(eq(schema.downstreamApiKeys.id, id))
+            .run();
+        } else if (action === 'resetUsage') {
+          await db.update(schema.downstreamApiKeys).set({
+            usedCost: 0,
+            usedRequests: 0,
+            updatedAt: new Date().toISOString(),
+          }).where(eq(schema.downstreamApiKeys.id, id)).run();
+        } else {
+          await db.update(schema.downstreamApiKeys).set({
+            enabled: action === 'enable',
+            updatedAt: new Date().toISOString(),
+          }).where(eq(schema.downstreamApiKeys.id, id)).run();
+        }
+
+        successIds.push(id);
+      } catch (error: any) {
+        failedItems.push({ id, message: error?.message || 'Batch operation failed' });
+      }
+    }
+
+    return {
+      success: true,
+      successIds,
+      failedItems,
+    };
   });
 }
