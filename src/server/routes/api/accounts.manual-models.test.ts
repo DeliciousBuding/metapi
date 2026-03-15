@@ -130,4 +130,16 @@ describe('accounts manual models endpoint', () => {
 
     expect(response.statusCode).toBe(404);
   });
+
+  it('returns validation error for empty models array', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/accounts/1/models/manual',
+      payload: {
+        models: [],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
 });

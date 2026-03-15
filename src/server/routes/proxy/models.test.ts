@@ -354,7 +354,7 @@ describe('/v1/models route', () => {
 
     await db.insert(schema.downstreamApiKeys).values({
       name: 'search-key',
-      key: 'change-me-proxy-sk-token',
+      key: 'sk-search-key',
       enabled: true,
     }).run();
 
@@ -362,7 +362,7 @@ describe('/v1/models route', () => {
       method: 'GET',
       url: '/v1/models',
       headers: {
-        authorization: 'Bearer change-me-proxy-sk-token',
+        authorization: 'Bearer sk-search-key',
       },
     });
 

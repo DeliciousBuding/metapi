@@ -1432,30 +1432,32 @@ export async function accountsRoutes(app: FastifyInstance) {
     }
 
     try {
-      for (const modelName of normalizedModels) {
-        const existing = await db.select()
-          .from(schema.modelAvailability)
-          .where(and(eq(schema.modelAvailability.accountId, accountId), eq(schema.modelAvailability.modelName, modelName)))
-          .get();
+      await db.transaction(async (tx: any) => {
+        for (const modelName of normalizedModels) {
+          const existing = await tx.select()
+            .from(schema.modelAvailability)
+            .where(and(eq(schema.modelAvailability.accountId, accountId), eq(schema.modelAvailability.modelName, modelName)))
+            .get();
 
-        if (existing) {
-          if (!existing.available || !existing.isManual) {
-            await db.update(schema.modelAvailability)
-              .set({ available: true, latencyMs: null, isManual: true, checkedAt: new Date().toISOString() })
-              .where(eq(schema.modelAvailability.id, existing.id))
-              .run();
+          if (existing) {
+            if (!existing.available || !existing.isManual) {
+              await tx.update(schema.modelAvailability)
+                .set({ available: true, latencyMs: null, isManual: true, checkedAt: new Date().toISOString() })
+                .where(eq(schema.modelAvailability.id, existing.id))
+                .run();
+            }
+          } else {
+            await tx.insert(schema.modelAvailability).values({
+              accountId,
+              modelName,
+              available: true,
+              isManual: true,
+              latencyMs: null,
+              checkedAt: new Date().toISOString(),
+            }).run();
           }
-        } else {
-          await db.insert(schema.modelAvailability).values({
-            accountId,
-            modelName,
-            available: true,
-            isManual: true,
-            latencyMs: null,
-            checkedAt: new Date().toISOString(),
-          }).run();
         }
-      }
+      });
 
       try {
         await rebuildTokenRoutesFromAvailability();

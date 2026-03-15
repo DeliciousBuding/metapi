@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -50,6 +50,11 @@ describe('accounts skipModelFetch behavior', () => {
 
   afterAll(async () => {
     await app.close();
+    if (dataDir) {
+      try {
+        rmSync(dataDir, { recursive: true, force: true });
+      } catch { }
+    }
     delete process.env.DATA_DIR;
   });
 
