@@ -65,7 +65,7 @@ function mapColumnType(dialect: SqlDialect, columnName: string, column: SchemaCo
       case 'json':
         return 'JSON';
       case 'text':
-        return column.defaultValue != null ? 'VARCHAR(191)' : 'TEXT';
+        return column.primaryKey || column.defaultValue != null ? 'VARCHAR(191)' : 'TEXT';
       default:
         return 'TEXT';
     }
