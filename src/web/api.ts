@@ -204,6 +204,10 @@ export type ProxyLogListItem = {
   siteName?: string | null;
   siteUrl?: string | null;
   errorMessage?: string | null;
+  downstreamKeyId?: number | null;
+  downstreamKeyName?: string | null;
+  downstreamKeyGroupName?: string | null;
+  downstreamKeyTags?: string[];
   promptTokens?: number | null;
   completionTokens?: number | null;
   estimatedCost?: number | null;

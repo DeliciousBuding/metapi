@@ -196,6 +196,47 @@ function parseTagText(value: string): string[] {
   return normalizeTags(value.split(/[\r\n,，]+/g));
 }
 
+function parseInlineRegex(value: string): RegExp | null {
+  const text = value.trim();
+  if (!text.startsWith('/') || text.length < 2) return null;
+  const lastSlash = text.lastIndexOf('/');
+  if (lastSlash <= 0) return null;
+  const pattern = text.slice(1, lastSlash);
+  const flags = text.slice(lastSlash + 1);
+  if (!pattern) return null;
+  if (!/^[dgimsuvy]*$/i.test(flags)) return null;
+  try {
+    return new RegExp(pattern, flags || 'i');
+  } catch {
+    return null;
+  }
+}
+
+function buildSearchMatcher(search: string): ((haystack: string) => boolean) | null {
+  const text = search.trim();
+  if (!text) return null;
+  const regex = parseInlineRegex(text);
+  if (regex) {
+    return (haystack: string) => regex.test(haystack);
+  }
+  const normalized = text.toLowerCase();
+  return (haystack: string) => haystack.toLowerCase().includes(normalized);
+}
+
+function splitSearchInput(value: string): { textSearch: string; inlineTags: string[] } {
+  const raw = value.trim();
+  if (!raw) return { textSearch: '', inlineTags: [] };
+  if (parseInlineRegex(raw)) return { textSearch: raw, inlineTags: [] };
+
+  const parts = raw.split(/[\r\n,，]+/g).map((item) => item.trim()).filter(Boolean);
+  if (parts.length <= 1) return { textSearch: raw, inlineTags: [] };
+
+  return {
+    textSearch: '',
+    inlineTags: normalizeTags(parts),
+  };
+}
+
 function tagChipStyle(kind: 'normal' | 'accent' = 'normal'): React.CSSProperties {
   return {
     display: 'inline-flex',
@@ -366,6 +407,74 @@ function TagInput({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function SummaryMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 28 }}>
+      <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{label}</span>
+      <strong style={{ fontSize: 13, color: 'var(--color-text-primary)', fontWeight: 600 }}>{value}</strong>
+    </div>
+  );
+}
+
+function InlineToggle({
+  value,
+  onChange,
+}: {
+  value: TagMatchMode;
+  onChange: (value: TagMatchMode) => void;
+}) {
+  const options: Array<{ value: TagMatchMode; label: string }> = [
+    { value: 'any', label: '匹配任一标签' },
+    { value: 'all', label: '匹配全部标签' },
+  ];
+
+  const base: React.CSSProperties = {
+    padding: '6px 12px',
+    fontSize: 12,
+    fontWeight: 600,
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-bg-card)',
+    color: 'var(--color-text-muted)',
+    cursor: 'pointer',
+  };
+
+  const active: React.CSSProperties = {
+    background: 'var(--color-primary)',
+    color: '#fff',
+    borderColor: 'var(--color-primary)',
+  };
+
+  return (
+    <div style={{ display: 'inline-flex', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+      {options.map((option, index) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          style={{
+            ...base,
+            ...(value === option.value ? active : {}),
+            ...(index === 0
+              ? { borderRight: 'none' }
+              : { borderTopRightRadius: 'var(--radius-sm)', borderBottomRightRadius: 'var(--radius-sm)' }),
+            ...(index === 0
+              ? { borderTopLeftRadius: 'var(--radius-sm)', borderBottomLeftRadius: 'var(--radius-sm)' }
+              : {}),
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -921,9 +1030,8 @@ export default function DownstreamKeys() {
   const [range, setRange] = useState<Range>('24h');
   const [status, setStatus] = useState<Status>('all');
   const [searchInput, setSearchInput] = useState('');
-  const deferredSearch = useDeferredValue(searchInput.trim().toLowerCase());
+  const deferredSearch = useDeferredValue(searchInput.trim());
   const [groupFilter, setGroupFilter] = useState('__all__');
-  const [tagFilterInput, setTagFilterInput] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [tagMatchMode, setTagMatchMode] = useState<TagMatchMode>('any');
   const [summaryItems, setSummaryItems] = useState<SummaryItem[]>([]);
@@ -1021,19 +1129,26 @@ export default function DownstreamKeys() {
     [groupSuggestions],
   );
 
+  const parsedSearch = useMemo(() => splitSearchInput(deferredSearch), [deferredSearch]);
+  const activeTagFilters = useMemo(
+    () => normalizeTags([...selectedTags, ...parsedSearch.inlineTags]),
+    [parsedSearch.inlineTags, selectedTags],
+  );
+  const searchMatcher = useMemo(() => buildSearchMatcher(parsedSearch.textSearch), [parsedSearch.textSearch]);
+
   const visibleItems = useMemo(() => managedItems.filter((item) => {
     if (status === 'enabled' && !item.enabled) return false;
     if (status === 'disabled' && item.enabled) return false;
     if (groupFilter === '__ungrouped__' && item.groupName) return false;
     if (groupFilter !== '__all__' && groupFilter !== '__ungrouped__' && item.groupName !== groupFilter) return false;
-    if (selectedTags.length > 0) {
+    if (activeTagFilters.length > 0) {
       const itemTags = new Set((item.tags || []).map((tag) => tag.toLowerCase()));
       const matches = tagMatchMode === 'all'
-        ? selectedTags.every((tag) => itemTags.has(tag.toLowerCase()))
-        : selectedTags.some((tag) => itemTags.has(tag.toLowerCase()));
+        ? activeTagFilters.every((tag) => itemTags.has(tag.toLowerCase()))
+        : activeTagFilters.some((tag) => itemTags.has(tag.toLowerCase()));
       if (!matches) return false;
     }
-    if (!deferredSearch) return true;
+    if (!searchMatcher) return true;
     const haystack = [
       item.name,
       item.description || '',
@@ -1042,15 +1157,15 @@ export default function DownstreamKeys() {
       ...(item.tags || []),
       ...(item.supportedModels || []),
       ...((item.allowedRouteIds || []).map((id) => routeTitle(routeMap.get(id) || { id, modelPattern: String(id), enabled: true } as RouteSelectorItem))),
-    ].join(' ').toLowerCase();
-    return haystack.includes(deferredSearch);
+    ].join(' ');
+    return searchMatcher(haystack);
   }).sort((a, b) => {
     if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
     const lastA = a.lastUsedAt ? Date.parse(a.lastUsedAt) : 0;
     const lastB = b.lastUsedAt ? Date.parse(b.lastUsedAt) : 0;
     if (lastA !== lastB) return lastB - lastA;
     return a.name.localeCompare(b.name);
-  }), [deferredSearch, groupFilter, managedItems, routeMap, selectedTags, status, tagMatchMode]);
+  }), [activeTagFilters, groupFilter, managedItems, routeMap, searchMatcher, status, tagMatchMode]);
 
   const visibleIds = useMemo(() => visibleItems.map((item) => item.id), [visibleItems]);
   const selectedVisibleCount = useMemo(() => selectedIds.filter((id) => visibleIds.includes(id)).length, [selectedIds, visibleIds]);
@@ -1281,9 +1396,10 @@ export default function DownstreamKeys() {
   };
 
   const addTagFilter = (raw: string) => {
-    const next = normalizeTags([...selectedTags, ...parseTagText(raw)]);
+    const text = raw.trim();
+    if (!text || parseInlineRegex(text)) return;
+    const next = normalizeTags([...selectedTags, ...parseTagText(text)]);
     setSelectedTags(next);
-    setTagFilterInput('');
   };
 
   const openBatchMetadata = () => {
@@ -1321,90 +1437,82 @@ export default function DownstreamKeys() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-        <div className="stat-card">
-          <div className="stat-card-header"><span>当前范围</span></div>
-          <div className="stat-card-row"><span>时间窗口</span><strong>{range === '24h' ? '最近 24 小时' : range === '7d' ? '最近 7 天' : '全部历史'}</strong></div>
-          <div className="stat-card-row"><span>可见密钥</span><strong>{visibleItems.length}</strong></div>
+      <div className="card" style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span className="kpi-chip">当前范围</span>
+          <span className="kpi-chip kpi-chip-success">
+            {range === '24h' ? '最近 24 小时' : range === '7d' ? '最近 7 天' : '全部历史'}
+          </span>
+          <span className="kpi-chip kpi-chip-warning">
+            Tokens {formatCompactTokens(totals.tokens)}
+          </span>
         </div>
-        <div className="stat-card">
-          <div className="stat-card-header"><span>运行状态</span></div>
-          <div className="stat-card-row"><span>启用中</span><strong>{totals.enabled}</strong></div>
-          <div className="stat-card-row"><span>已选中</span><strong>{selectedIds.length}</strong></div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-header"><span>范围用量</span></div>
-          <div className="stat-card-row"><span>Tokens</span><strong>{formatCompactTokens(totals.tokens)}</strong></div>
-          <div className="stat-card-row"><span>请求数</span><strong>{totals.requests.toLocaleString()}</strong></div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-header"><span>范围成本</span></div>
-          <div className="stat-card-row"><span>累计成本</span><strong>{formatMoney(totals.cost)}</strong></div>
-          <div className="stat-card-row"><span>筛选状态</span><strong>{statusOptions.find((item) => item.value === status)?.label || '全部状态'}</strong></div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 18px', alignItems: 'center' }}>
+          <SummaryMetric label="可见密钥" value={String(visibleItems.length)} />
+          <SummaryMetric label="启用中" value={String(totals.enabled)} />
+          <SummaryMetric label="已选中" value={String(selectedIds.length)} />
+          <SummaryMetric label="请求数" value={totals.requests.toLocaleString()} />
+          <SummaryMetric label="累计成本" value={formatMoney(totals.cost)} />
+          <SummaryMetric label="筛选状态" value={statusOptions.find((item) => item.value === status)?.label || '全部状态'} />
         </div>
       </div>
 
       <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="toolbar" style={{ marginBottom: 0 }}>
-          <div className="toolbar-search">
-            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="搜索名称、备注、模型、主分组或标签" />
-          </div>
-          <div style={{ minWidth: 180 }}>
-            <ModernSelect value={status} onChange={(value) => setStatus((value as Status) || 'all')} options={statusOptions} />
-          </div>
-          <div style={{ minWidth: 180 }}>
-            <ModernSelect value={groupFilter} onChange={(value) => setGroupFilter(String(value || '__all__'))} options={groupFilterOptions} />
-          </div>
-          <div style={{ minWidth: 140 }}>
-            <ModernSelect
-              value={tagMatchMode}
-              onChange={(value) => setTagMatchMode((value as TagMatchMode) || 'any')}
-              options={[
-                { value: 'any', label: '标签任一命中' },
-                { value: 'all', label: '标签全部命中' },
-              ]}
-            />
-          </div>
-          <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => { setSearchInput(''); setStatus('all'); setGroupFilter('__all__'); setSelectedTags([]); setTagFilterInput(''); setTagMatchMode('any'); }}>
-            重置筛选
-          </button>
-        </div>
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div className="toolbar-search" style={{ maxWidth: 360, flex: '1 1 320px' }}>
-              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                value={tagFilterInput}
-                onChange={(e) => setTagFilterInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ',') {
-                    e.preventDefault();
-                    addTagFilter(tagFilterInput);
-                  }
-                }}
-                onBlur={() => {
-                  if (tagFilterInput.trim()) addTagFilter(tagFilterInput);
-                }}
-                placeholder="添加标签筛选，按回车或逗号"
-              />
+          <div className="toolbar" style={{ marginBottom: 0, alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 420px', minWidth: 280, flexWrap: 'wrap' }}>
+              <div className="toolbar-search" style={{ maxWidth: 'unset', flex: '1 1 320px' }}>
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="搜索名称、备注、模型、主分组或标签"
+                />
+              </div>
+              <InlineToggle value={tagMatchMode} onChange={setTagMatchMode} />
             </div>
-            {tagSuggestions.slice(0, 8).map((tag) => (
-              <button key={tag} className="btn btn-ghost" style={tagChipStyle()} onClick={() => addTagFilter(tag)}>
-                {tag}
-              </button>
-            ))}
+            <div style={{ minWidth: 170 }}>
+              <ModernSelect value={status} onChange={(value) => setStatus((value as Status) || 'all')} options={statusOptions} />
+            </div>
+            <div style={{ minWidth: 170 }}>
+              <ModernSelect value={groupFilter} onChange={(value) => setGroupFilter(String(value || '__all__'))} options={groupFilterOptions} />
+            </div>
+            <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => { setSearchInput(''); setStatus('all'); setGroupFilter('__all__'); setSelectedTags([]); setTagMatchMode('any'); }}>
+              重置筛选
+            </button>
           </div>
-          {selectedTags.length > 0 ? (
+
+          {(activeTagFilters.length > 0 || tagSuggestions.length > 0) ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {selectedTags.map((tag) => (
-                <button key={tag} className="btn btn-ghost" style={{ ...tagChipStyle('accent'), cursor: 'pointer' }} onClick={() => setSelectedTags((current) => current.filter((item) => item !== tag))}>
-                  {tag} ×
+              {activeTagFilters.map((tag) => {
+                const fromPinnedTags = selectedTags.some((item) => item.toLowerCase() === tag.toLowerCase());
+                return (
+                  <button
+                    key={tag}
+                    className="btn btn-ghost"
+                    style={{ ...tagChipStyle('accent'), cursor: 'pointer', opacity: fromPinnedTags ? 1 : 0.82 }}
+                    onClick={() => {
+                      if (fromPinnedTags) {
+                        setSelectedTags((current) => current.filter((item) => item.toLowerCase() !== tag.toLowerCase()));
+                        return;
+                      }
+                      setSearchInput((current) => current
+                        .split(/[\r\n,，]+/g)
+                        .map((item) => item.trim())
+                        .filter(Boolean)
+                        .filter((item) => item.toLowerCase() !== tag.toLowerCase())
+                        .join(', '));
+                    }}
+                  >
+                    {tag} ×
+                  </button>
+                );
+              })}
+              {tagSuggestions.filter((tag) => !activeTagFilters.some((current) => current.toLowerCase() === tag.toLowerCase())).slice(0, 8).map((tag) => (
+                <button key={tag} className="btn btn-ghost" style={tagChipStyle()} onClick={() => addTagFilter(tag)}>
+                  {tag}
                 </button>
               ))}
             </div>
@@ -1412,8 +1520,8 @@ export default function DownstreamKeys() {
         </div>
 
         {selectedIds.length > 0 ? (
-          <div className="card" style={{ padding: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: 'color-mix(in srgb, var(--color-primary) 6%, var(--color-bg-card))' }}>
-            <span style={{ fontSize: 13, fontWeight: 700 }}>已选 {selectedIds.length} 个密钥</span>
+          <div className="card" style={{ padding: '10px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: 'color-mix(in srgb, var(--color-primary) 5%, var(--color-bg-card))' }}>
+            <span className="kpi-chip kpi-chip-success">已选 {selectedIds.length} 个密钥</span>
             <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={openBatchMetadata} disabled={batchActionLoading}>批量归类/标签</button>
             <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量启用', selectedIds)} disabled={batchActionLoading}>批量启用</button>
             <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量禁用', selectedIds)} disabled={batchActionLoading}>批量禁用</button>
