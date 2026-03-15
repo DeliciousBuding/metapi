@@ -232,7 +232,7 @@ describe('sqlite migrate bootstrap', () => {
       JSON.stringify({
         entries: [
           {
-            tag: '0008_sqlite_schema_backfill',
+            tag: '0009_model_availability_is_manual',
             when: 1772600000000,
           },
         ],
@@ -240,7 +240,7 @@ describe('sqlite migrate bootstrap', () => {
     );
 
     writeFileSync(
-      join(tempMigrationsDir, '0008_sqlite_schema_backfill.sql'),
+      join(tempMigrationsDir, '0009_model_availability_is_manual.sql'),
       [
         'CREATE TABLE IF NOT EXISTS `downstream_api_keys` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL);',
         'ALTER TABLE `account_tokens` ADD `token_group` text;',
@@ -282,6 +282,7 @@ describe('sqlite migrate bootstrap', () => {
       '0006_site_disabled_models',
       '0007_account_token_group',
       '0008_sqlite_schema_backfill',
+      '0009_model_availability_is_manual',
     ]);
     const appliedEntries = journalEntries.filter((entry) => !missingTags.has(entry.tag));
 

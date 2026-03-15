@@ -34,7 +34,7 @@ type RecoveryMigration = RecoveryMigrationRecord & {
   statements: string[];
 };
 
-const VERIFIED_BOOTSTRAP_TAG = '0007_account_token_group';
+const VERIFIED_BOOTSTRAP_TAG = '0009_model_availability_is_manual';
 const VERIFIED_SCHEMA_MARKERS: SchemaMarker[] = [
   { table: 'sites' },
   { table: 'settings' },
@@ -55,6 +55,8 @@ const VERIFIED_SCHEMA_MARKERS: SchemaMarker[] = [
   { table: 'site_disabled_models' },
   // 0007: token_group column on account_tokens
   { table: 'account_tokens', column: 'token_group' },
+  // 0009: is_manual column on model_availability
+  { table: 'model_availability', column: 'is_manual' },
 ];
 
 

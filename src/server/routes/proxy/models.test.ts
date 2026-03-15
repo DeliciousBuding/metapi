@@ -352,6 +352,12 @@ describe('/v1/models route', () => {
       },
     ]).run();
 
+    await db.insert(schema.downstreamApiKeys).values({
+      name: 'search-key',
+      key: 'change-me-proxy-sk-token',
+      enabled: true,
+    }).run();
+
     const response = await app.inject({
       method: 'GET',
       url: '/v1/models',

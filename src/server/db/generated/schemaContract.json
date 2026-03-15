@@ -417,6 +417,12 @@
           "notNull": false,
           "defaultValue": "datetime('now')",
           "primaryKey": false
+        },
+        "is_manual": {
+          "logicalType": "boolean",
+          "notNull": false,
+          "defaultValue": "false",
+          "primaryKey": false
         }
       }
     },
