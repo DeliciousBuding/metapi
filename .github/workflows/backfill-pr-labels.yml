@@ -28,13 +28,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Backfill PR labels
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const requestedState = core.getInput('state');
-            const limit = Number.parseInt(core.getInput('limit'), 10);
+            const inputs = context.payload.inputs || {};
+            const requestedState = inputs.state || 'all';
+            const limit = Number.parseInt(inputs.limit || '100', 10);
             const sizeLabels = ['size: XS', 'size: S', 'size: M', 'size: L', 'size: XL', 'size: XXL'];
             const areaRules = [
               { label: 'area: db', include: ['src/server/db/', 'drizzle/'] },
