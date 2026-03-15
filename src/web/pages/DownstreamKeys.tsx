@@ -18,6 +18,8 @@ type SummaryItem = {
   keyMasked: string;
   enabled: boolean;
   description: string | null;
+  groupName: string | null;
+  tags: string[];
   expiresAt: string | null;
   maxCost: number | null;
   usedCost: number;
@@ -64,6 +66,8 @@ type DownstreamApiKeyItem = {
   key: string;
   keyMasked: string;
   description: string | null;
+  groupName: string | null;
+  tags: string[];
   enabled: boolean;
   expiresAt: string | null;
   maxCost: number | null;
@@ -91,6 +95,8 @@ type EditorForm = {
   name: string;
   key: string;
   description: string;
+  groupName: string;
+  tags: string[];
   maxCost: string;
   maxRequests: string;
   expiresAt: string;
@@ -104,6 +110,15 @@ type DeleteConfirmState =
   | null
   | { mode: 'single'; item: ManagedItem }
   | { mode: 'batch'; ids: number[] };
+
+type TagMatchMode = 'any' | 'all';
+
+type BatchMetadataForm = {
+  groupOperation: 'keep' | 'set' | 'clear';
+  groupName: string;
+  tagOperation: 'keep' | 'append';
+  tags: string[];
+};
 
 function formatIso(value: string | null | undefined): string {
   const text = (value || '').trim();
@@ -157,8 +172,44 @@ function uniqStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))];
 }
 
+function normalizeTags(values: string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = String(raw || '').trim();
+    if (!value) continue;
+    const normalized = value.slice(0, 32);
+    const dedupeKey = normalized.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    result.push(normalized);
+    if (result.length >= 20) break;
+  }
+  return result;
+}
+
 function uniqIds(values: number[]): number[] {
   return [...new Set(values.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0).map((value) => Math.trunc(value)))];
+}
+
+function parseTagText(value: string): string[] {
+  return normalizeTags(value.split(/[\r\n,，]+/g));
+}
+
+function tagChipStyle(kind: 'normal' | 'accent' = 'normal'): React.CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '2px 8px',
+    borderRadius: 999,
+    fontSize: 11,
+    border: '1px solid var(--color-border-light)',
+    color: kind === 'accent' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+    background: kind === 'accent'
+      ? 'color-mix(in srgb, var(--color-primary) 10%, transparent)'
+      : 'var(--color-bg-card)',
+  };
 }
 
 function buildEditorForm(item?: ManagedItem | DownstreamApiKeyItem | null): EditorForm {
@@ -166,6 +217,8 @@ function buildEditorForm(item?: ManagedItem | DownstreamApiKeyItem | null): Edit
     name: item?.name || '',
     key: item?.key || '',
     description: item?.description || '',
+    groupName: item?.groupName || '',
+    tags: normalizeTags(Array.isArray(item?.tags) ? item!.tags : []),
     maxCost: item?.maxCost === null || item?.maxCost === undefined ? '' : String(item.maxCost),
     maxRequests: item?.maxRequests === null || item?.maxRequests === undefined ? '' : String(item.maxRequests),
     expiresAt: toDateTimeLocal(item?.expiresAt),
@@ -198,6 +251,123 @@ function summarizeSiteWeightMultipliers(weights: Record<number, number> | undefi
   if (entries.length === 0) return '默认倍率';
   if (entries.length === 1) return `${entries[0][0]} => ${entries[0][1]}`;
   return `${entries[0][0]} => ${entries[0][1]} +${entries.length - 1}`;
+}
+
+function summarizeTags(tags: string[]): string {
+  if (!Array.isArray(tags) || tags.length === 0) return '无标签';
+  if (tags.length === 1) return tags[0];
+  return `${tags[0]} +${tags.length - 1}`;
+}
+
+function TagChips({
+  tags,
+  accent = false,
+  maxVisible = 3,
+}: {
+  tags: string[];
+  accent?: boolean;
+  maxVisible?: number;
+}) {
+  if (!Array.isArray(tags) || tags.length === 0) {
+    return <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>无标签</span>;
+  }
+
+  const visible = tags.slice(0, maxVisible);
+  const hidden = tags.length - visible.length;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {visible.map((tag) => (
+        <span key={tag} style={tagChipStyle(accent ? 'accent' : 'normal')}>
+          {tag}
+        </span>
+      ))}
+      {hidden > 0 ? <span style={tagChipStyle()}>{`+${hidden}`}</span> : null}
+    </div>
+  );
+}
+
+function TagInput({
+  tags,
+  onChange,
+  suggestions = [],
+  placeholder,
+}: {
+  tags: string[];
+  onChange: (tags: string[]) => void;
+  suggestions?: string[];
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = useState('');
+
+  useEffect(() => {
+    setDraft('');
+  }, [tags.length]);
+
+  const commitDraft = () => {
+    const nextTags = normalizeTags([...tags, ...parseTagText(draft)]);
+    if (nextTags.length !== tags.length) {
+      onChange(nextTags);
+    }
+    setDraft('');
+  };
+
+  const removeTag = (target: string) => {
+    onChange(tags.filter((tag) => tag !== target));
+  };
+
+  const suggestionPool = suggestions.filter((tag) => !tags.some((current) => current.toLowerCase() === tag.toLowerCase())).slice(0, 12);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', background: 'var(--color-bg)', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {tags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => removeTag(tag)}
+              style={{ ...tagChipStyle('accent'), cursor: 'pointer' }}
+              title={`移除 ${tag}`}
+            >
+              <span>{tag}</span>
+              <span aria-hidden="true">×</span>
+            </button>
+          ))}
+        </div>
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault();
+              commitDraft();
+            } else if (e.key === 'Backspace' && !draft && tags.length > 0) {
+              e.preventDefault();
+              onChange(tags.slice(0, -1));
+            }
+          }}
+          placeholder={placeholder || '输入标签后按回车或逗号'}
+          style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'var(--color-text-primary)', padding: 0 }}
+        />
+      </div>
+      {suggestionPool.length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {suggestionPool.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className="btn btn-ghost"
+              style={{ ...tagChipStyle(), cursor: 'pointer' }}
+              onClick={() => onChange(normalizeTags([...tags, tag]))}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function RangeToggle({ range, onChange }: { range: Range; onChange: (r: Range) => void }) {
@@ -359,6 +529,12 @@ function Drawer({
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
               {item?.keyMasked || '****'}
             </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+              <span style={tagChipStyle(item?.groupName ? 'accent' : 'normal')}>
+                {item?.groupName ? `主分组 · ${item.groupName}` : '未分组'}
+              </span>
+              <TagChips tags={item?.tags || []} accent maxVisible={4} />
+            </div>
           </div>
           <button className="btn btn-ghost" onClick={onClose} style={{ border: '1px solid var(--color-border)' }}>
             关闭
@@ -400,6 +576,14 @@ function Drawer({
                 <div>
                   <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>到期时间</div>
                   <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{formatIso(item?.expiresAt)}</div>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>主分组</div>
+                  <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{item?.groupName || '未分组'}</div>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={{ color: 'var(--color-text-muted)', marginBottom: 6 }}>标签</div>
+                  <TagChips tags={item?.tags || []} accent maxVisible={6} />
                 </div>
               </div>
             )}
@@ -475,6 +659,8 @@ function EditorModal({
   onSave,
   saving,
   routeOptions,
+  groupSuggestions,
+  tagSuggestions,
 }: {
   open: boolean;
   editingItem: ManagedItem | null;
@@ -484,6 +670,8 @@ function EditorModal({
   onSave: () => void;
   saving: boolean;
   routeOptions: RouteSelectorItem[];
+  groupSuggestions: string[];
+  tagSuggestions: string[];
 }) {
   const [modelSearch, setModelSearch] = useState('');
   const [groupSearch, setGroupSearch] = useState('');
@@ -545,7 +733,7 @@ function EditorModal({
       )}
     >
       <div className="info-tip" style={{ marginBottom: 0 }}>
-        支持为每个下游密钥独立配置过期时间、额度上限、模型白名单与群组范围。留空表示不限制。
+        支持为每个下游密钥独立配置主分组、标签、过期时间、额度上限、模型白名单与群组范围。留空表示不限制。
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
@@ -556,6 +744,16 @@ function EditorModal({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>下游密钥</div>
           <input value={form.key} onChange={(e) => onChange((prev) => ({ ...prev, key: e.target.value }))} placeholder="sk-..." style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>主分组</div>
+          <input
+            value={form.groupName}
+            onChange={(e) => onChange((prev) => ({ ...prev, groupName: e.target.value }))}
+            placeholder="例如：VIP / 内部项目 / A组"
+            list="downstream-group-suggestions"
+            style={inputStyle}
+          />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>请求额度</div>
@@ -599,6 +797,17 @@ function EditorModal({
           placeholder="填写业务场景、负责人或限制说明"
           style={{ ...inputStyle, minHeight: 84, resize: 'vertical' }}
         />
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>标签</div>
+        <TagInput
+          tags={form.tags}
+          onChange={(tags) => onChange((prev) => ({ ...prev, tags }))}
+          suggestions={tagSuggestions}
+          placeholder="输入标签后按回车或逗号，例如：移动端、VIP、项目A"
+        />
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>标签用于搜索、筛选和辅助归类，不影响路由与权限。</div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -700,6 +909,9 @@ function EditorModal({
           </div>
         </div>
       </div>
+      <datalist id="downstream-group-suggestions">
+        {groupSuggestions.map((group) => <option key={group} value={group} />)}
+      </datalist>
     </CenteredModal>
   );
 }
@@ -710,6 +922,10 @@ export default function DownstreamKeys() {
   const [status, setStatus] = useState<Status>('all');
   const [searchInput, setSearchInput] = useState('');
   const deferredSearch = useDeferredValue(searchInput.trim().toLowerCase());
+  const [groupFilter, setGroupFilter] = useState('__all__');
+  const [tagFilterInput, setTagFilterInput] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [tagMatchMode, setTagMatchMode] = useState<TagMatchMode>('any');
   const [summaryItems, setSummaryItems] = useState<SummaryItem[]>([]);
   const [rawItems, setRawItems] = useState<DownstreamApiKeyItem[]>([]);
   const [routeOptions, setRouteOptions] = useState<RouteSelectorItem[]>([]);
@@ -724,6 +940,13 @@ export default function DownstreamKeys() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>(null);
+  const [batchMetadataOpen, setBatchMetadataOpen] = useState(false);
+  const [batchMetadataForm, setBatchMetadataForm] = useState<BatchMetadataForm>({
+    groupOperation: 'keep',
+    groupName: '',
+    tagOperation: 'keep',
+    tags: [],
+  });
 
   const load = async () => {
     setLoading(true);
@@ -763,6 +986,8 @@ export default function DownstreamKeys() {
         key: raw?.key,
         keyMasked: raw?.keyMasked || item.keyMasked,
         description: raw?.description ?? item.description,
+        groupName: raw?.groupName ?? item.groupName,
+        tags: raw?.tags ?? item.tags,
         enabled: raw?.enabled ?? item.enabled,
         expiresAt: raw?.expiresAt ?? item.expiresAt,
         maxCost: raw?.maxCost ?? item.maxCost,
@@ -777,14 +1002,44 @@ export default function DownstreamKeys() {
     })
   ), [rawItemMap, summaryItems]);
 
+  const groupSuggestions = useMemo(
+    () => uniqStrings(managedItems.map((item) => item.groupName || '')).sort((a, b) => a.localeCompare(b)),
+    [managedItems],
+  );
+
+  const tagSuggestions = useMemo(
+    () => uniqStrings(managedItems.flatMap((item) => item.tags || [])).sort((a, b) => a.localeCompare(b)),
+    [managedItems],
+  );
+
+  const groupFilterOptions = useMemo(
+    () => [
+      { value: '__all__', label: '全部主分组' },
+      { value: '__ungrouped__', label: '未分组' },
+      ...groupSuggestions.map((group) => ({ value: group, label: group })),
+    ],
+    [groupSuggestions],
+  );
+
   const visibleItems = useMemo(() => managedItems.filter((item) => {
     if (status === 'enabled' && !item.enabled) return false;
     if (status === 'disabled' && item.enabled) return false;
+    if (groupFilter === '__ungrouped__' && item.groupName) return false;
+    if (groupFilter !== '__all__' && groupFilter !== '__ungrouped__' && item.groupName !== groupFilter) return false;
+    if (selectedTags.length > 0) {
+      const itemTags = new Set((item.tags || []).map((tag) => tag.toLowerCase()));
+      const matches = tagMatchMode === 'all'
+        ? selectedTags.every((tag) => itemTags.has(tag.toLowerCase()))
+        : selectedTags.some((tag) => itemTags.has(tag.toLowerCase()));
+      if (!matches) return false;
+    }
     if (!deferredSearch) return true;
     const haystack = [
       item.name,
       item.description || '',
       item.keyMasked,
+      item.groupName || '',
+      ...(item.tags || []),
       ...(item.supportedModels || []),
       ...((item.allowedRouteIds || []).map((id) => routeTitle(routeMap.get(id) || { id, modelPattern: String(id), enabled: true } as RouteSelectorItem))),
     ].join(' ').toLowerCase();
@@ -795,7 +1050,7 @@ export default function DownstreamKeys() {
     const lastB = b.lastUsedAt ? Date.parse(b.lastUsedAt) : 0;
     if (lastA !== lastB) return lastB - lastA;
     return a.name.localeCompare(b.name);
-  }), [deferredSearch, managedItems, routeMap, status]);
+  }), [deferredSearch, groupFilter, managedItems, routeMap, selectedTags, status, tagMatchMode]);
 
   const visibleIds = useMemo(() => visibleItems.map((item) => item.id), [visibleItems]);
   const selectedVisibleCount = useMemo(() => selectedIds.filter((id) => visibleIds.includes(id)).length, [selectedIds, visibleIds]);
@@ -834,6 +1089,15 @@ export default function DownstreamKeys() {
     setEditingId(null);
     setEditorForm(buildEditorForm());
     setEditorOpen(true);
+  };
+
+  const resetBatchMetadataForm = () => {
+    setBatchMetadataForm({
+      groupOperation: 'keep',
+      groupName: '',
+      tagOperation: 'keep',
+      tags: [],
+    });
   };
 
   const openEdit = (item: ManagedItem) => {
@@ -899,6 +1163,8 @@ export default function DownstreamKeys() {
         name,
         key,
         description: editorForm.description.trim(),
+        groupName: editorForm.groupName.trim() || null,
+        tags: normalizeTags(editorForm.tags),
         enabled: editorForm.enabled,
         expiresAt: editorForm.expiresAt ? new Date(editorForm.expiresAt).toISOString() : null,
         maxCost: editorForm.maxCost.trim() ? Number(editorForm.maxCost.trim()) : null,
@@ -939,16 +1205,26 @@ export default function DownstreamKeys() {
     if (ids.length === 0) return;
     setBatchActionLoading(true);
     try {
-      const result = await api.batchDownstreamApiKeys({
-        ids,
-        action: label === '批量启用'
-          ? 'enable'
-          : label === '批量禁用'
-            ? 'disable'
-            : label === '批量删除'
-              ? 'delete'
-              : 'resetUsage',
-      });
+      const action = label === '批量启用'
+        ? 'enable'
+        : label === '批量禁用'
+          ? 'disable'
+          : label === '批量删除'
+            ? 'delete'
+            : label === '批量清零用量'
+              ? 'resetUsage'
+              : 'updateMetadata';
+      const payload = action === 'updateMetadata'
+        ? {
+          ids,
+          action,
+          groupOperation: batchMetadataForm.groupOperation,
+          groupName: batchMetadataForm.groupOperation === 'set' ? batchMetadataForm.groupName.trim() : undefined,
+          tagOperation: batchMetadataForm.tagOperation,
+          tags: batchMetadataForm.tagOperation === 'append' ? normalizeTags(batchMetadataForm.tags) : undefined,
+        }
+        : { ids, action };
+      const result = await api.batchDownstreamApiKeys(payload as any);
       const successIds = Array.isArray(result?.successIds) ? result.successIds.map((id: unknown) => Number(id)) : [];
       const failedItems = Array.isArray(result?.failedItems) ? result.failedItems : [];
       const failedIds = failedItems.map((item: any) => Number(item.id)).filter((id: number) => Number.isFinite(id) && id > 0);
@@ -959,6 +1235,10 @@ export default function DownstreamKeys() {
         toast.success(`${label}完成：成功 ${successCount}`);
       }
       setSelectedIds(failedIds);
+      if (action === 'updateMetadata' && failedIds.length === 0) {
+        setBatchMetadataOpen(false);
+        resetBatchMetadataForm();
+      }
       await load();
     } catch (err: any) {
       toast.error(err?.message || `${label}失败`);
@@ -1000,6 +1280,29 @@ export default function DownstreamKeys() {
     await batchRun('批量删除', target.ids);
   };
 
+  const addTagFilter = (raw: string) => {
+    const next = normalizeTags([...selectedTags, ...parseTagText(raw)]);
+    setSelectedTags(next);
+    setTagFilterInput('');
+  };
+
+  const openBatchMetadata = () => {
+    resetBatchMetadataForm();
+    setBatchMetadataOpen(true);
+  };
+
+  const runBatchMetadata = async () => {
+    if (batchMetadataForm.groupOperation === 'set' && !batchMetadataForm.groupName.trim()) {
+      toast.info('请填写批量主分组');
+      return;
+    }
+    if (batchMetadataForm.tagOperation === 'append' && normalizeTags(batchMetadataForm.tags).length === 0) {
+      toast.info('请至少填写一个批量标签');
+      return;
+    }
+    await batchRun('批量归类', selectedIds);
+  };
+
   const empty = !loading && visibleItems.length === 0;
 
   return (
@@ -1007,7 +1310,7 @@ export default function DownstreamKeys() {
       <div className="page-header" style={{ marginBottom: 0 }}>
         <div>
           <h2 className="page-title">下游密钥</h2>
-          <div className="page-subtitle">统一管理分发给下游项目的密钥、额度、模型白名单、群组范围与历史用量。</div>
+          <div className="page-subtitle">统一管理分发给下游项目的密钥、主分组、标签、额度、模型白名单、群组范围与历史用量。</div>
         </div>
         <div className="page-actions">
           <RangeToggle range={range} onChange={setRange} />
@@ -1047,19 +1350,71 @@ export default function DownstreamKeys() {
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="搜索名称、备注、模型或群组" />
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="搜索名称、备注、模型、主分组或标签" />
           </div>
           <div style={{ minWidth: 180 }}>
             <ModernSelect value={status} onChange={(value) => setStatus((value as Status) || 'all')} options={statusOptions} />
           </div>
-          <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => { setSearchInput(''); setStatus('all'); }}>
+          <div style={{ minWidth: 180 }}>
+            <ModernSelect value={groupFilter} onChange={(value) => setGroupFilter(String(value || '__all__'))} options={groupFilterOptions} />
+          </div>
+          <div style={{ minWidth: 140 }}>
+            <ModernSelect
+              value={tagMatchMode}
+              onChange={(value) => setTagMatchMode((value as TagMatchMode) || 'any')}
+              options={[
+                { value: 'any', label: '标签任一命中' },
+                { value: 'all', label: '标签全部命中' },
+              ]}
+            />
+          </div>
+          <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => { setSearchInput(''); setStatus('all'); setGroupFilter('__all__'); setSelectedTags([]); setTagFilterInput(''); setTagMatchMode('any'); }}>
             重置筛选
           </button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="toolbar-search" style={{ maxWidth: 360, flex: '1 1 320px' }}>
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                value={tagFilterInput}
+                onChange={(e) => setTagFilterInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    addTagFilter(tagFilterInput);
+                  }
+                }}
+                onBlur={() => {
+                  if (tagFilterInput.trim()) addTagFilter(tagFilterInput);
+                }}
+                placeholder="添加标签筛选，按回车或逗号"
+              />
+            </div>
+            {tagSuggestions.slice(0, 8).map((tag) => (
+              <button key={tag} className="btn btn-ghost" style={tagChipStyle()} onClick={() => addTagFilter(tag)}>
+                {tag}
+              </button>
+            ))}
+          </div>
+          {selectedTags.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {selectedTags.map((tag) => (
+                <button key={tag} className="btn btn-ghost" style={{ ...tagChipStyle('accent'), cursor: 'pointer' }} onClick={() => setSelectedTags((current) => current.filter((item) => item !== tag))}>
+                  {tag} ×
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {selectedIds.length > 0 ? (
           <div className="card" style={{ padding: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: 'color-mix(in srgb, var(--color-primary) 6%, var(--color-bg-card))' }}>
             <span style={{ fontSize: 13, fontWeight: 700 }}>已选 {selectedIds.length} 个密钥</span>
+            <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={openBatchMetadata} disabled={batchActionLoading}>批量归类/标签</button>
             <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量启用', selectedIds)} disabled={batchActionLoading}>批量启用</button>
             <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量禁用', selectedIds)} disabled={batchActionLoading}>批量禁用</button>
             <button className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => void batchRun('批量清零用量', selectedIds)} disabled={batchActionLoading}>批量清零用量</button>
@@ -1108,11 +1463,18 @@ export default function DownstreamKeys() {
                         </div>
                         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>{row.keyMasked}</div>
                         {row.description ? <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', maxWidth: 320 }}>{row.description}</div> : null}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                          <span style={tagChipStyle(row.groupName ? 'accent' : 'normal')}>
+                            {row.groupName ? `主分组 · ${row.groupName}` : '未分组'}
+                          </span>
+                          <TagChips tags={row.tags || []} maxVisible={3} />
+                        </div>
                       </td>
                       <td>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                           <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>模型：<span style={{ color: 'var(--color-text-primary)' }}>{summarizeModelLimit(row.supportedModels || [])}</span></div>
                           <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>群组：<span style={{ color: 'var(--color-text-primary)' }}>{summarizeRouteLimit(row.allowedRouteIds || [], routeMap)}</span></div>
+                          <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>标签：<span style={{ color: 'var(--color-text-primary)' }}>{summarizeTags(row.tags || [])}</span></div>
                           <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>倍率：<span style={{ color: 'var(--color-text-primary)' }}>{summarizeSiteWeightMultipliers(row.siteWeightMultipliers || {})}</span></div>
                         </div>
                       </td>
@@ -1154,7 +1516,70 @@ export default function DownstreamKeys() {
         onSave={() => void saveKey()}
         saving={saving}
         routeOptions={routeOptions}
+        groupSuggestions={groupSuggestions}
+        tagSuggestions={tagSuggestions}
       />
+
+      <CenteredModal
+        open={batchMetadataOpen}
+        onClose={() => { setBatchMetadataOpen(false); resetBatchMetadataForm(); }}
+        title="批量归类 / 标签"
+        maxWidth={720}
+        bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+        footer={(
+          <>
+            <button className="btn btn-ghost" onClick={() => { setBatchMetadataOpen(false); resetBatchMetadataForm(); }} disabled={batchActionLoading}>取消</button>
+            <button className="btn btn-primary" onClick={() => void runBatchMetadata()} disabled={batchActionLoading}>
+              {batchActionLoading ? <><span className="spinner spinner-sm" style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.3)' }} /> 保存中...</> : '应用到所选密钥'}
+            </button>
+          </>
+        )}
+      >
+        <div className="info-tip" style={{ marginBottom: 0 }}>
+          本次会对已选中的 {selectedIds.length} 个密钥批量设置主分组，并追加标签。不会改动模型白名单、群组范围、额度和倍率。
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>主分组操作</div>
+            <ModernSelect
+              value={batchMetadataForm.groupOperation}
+              onChange={(value) => setBatchMetadataForm((prev) => ({ ...prev, groupOperation: String(value) as BatchMetadataForm['groupOperation'] }))}
+              options={[
+                { value: 'keep', label: '不改动主分组' },
+                { value: 'set', label: '统一设为主分组' },
+                { value: 'clear', label: '清空主分组' },
+              ]}
+            />
+            <input
+              value={batchMetadataForm.groupName}
+              onChange={(e) => setBatchMetadataForm((prev) => ({ ...prev, groupName: e.target.value }))}
+              disabled={batchMetadataForm.groupOperation !== 'set'}
+              placeholder="例如：VIP / 内部项目"
+              list="downstream-group-suggestions"
+              style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', background: 'var(--color-bg)', color: 'var(--color-text-primary)' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>标签操作</div>
+            <ModernSelect
+              value={batchMetadataForm.tagOperation}
+              onChange={(value) => setBatchMetadataForm((prev) => ({ ...prev, tagOperation: String(value) as BatchMetadataForm['tagOperation'] }))}
+              options={[
+                { value: 'keep', label: '不改动标签' },
+                { value: 'append', label: '追加标签' },
+              ]}
+            />
+            <div style={{ opacity: batchMetadataForm.tagOperation === 'append' ? 1 : 0.6, pointerEvents: batchMetadataForm.tagOperation === 'append' ? 'auto' : 'none' }}>
+              <TagInput
+                tags={batchMetadataForm.tags}
+                onChange={(tags) => setBatchMetadataForm((prev) => ({ ...prev, tags }))}
+                suggestions={tagSuggestions}
+                placeholder="批量追加标签"
+              />
+            </div>
+          </div>
+        </div>
+      </CenteredModal>
 
       <DeleteConfirmModal
         open={Boolean(deleteConfirm)}

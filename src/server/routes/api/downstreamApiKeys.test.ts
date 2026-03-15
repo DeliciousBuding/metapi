@@ -59,6 +59,8 @@ describe('downstream api keys routes', () => {
         name: 'portal-key',
         key: 'sk-portal-key-001',
         description: 'portal consumer',
+        groupName: '项目A',
+        tags: ['移动端', 'VIP'],
         enabled: true,
         maxCost: 12.5,
         maxRequests: 500,
@@ -74,6 +76,8 @@ describe('downstream api keys routes', () => {
     expect(createdBody.item).toMatchObject({
       name: 'portal-key',
       keyMasked: expect.any(String),
+      groupName: '项目A',
+      tags: ['移动端', 'VIP'],
       maxCost: 12.5,
       maxRequests: 500,
       supportedModels: ['gpt-5.2', 'claude-sonnet-4-5'],
@@ -88,6 +92,8 @@ describe('downstream api keys routes', () => {
       payload: {
         name: 'portal-key-updated',
         key: 'sk-portal-key-001',
+        groupName: '项目B',
+        tags: ['批量候选', 'VIP'],
         enabled: false,
         maxCost: 20,
         maxRequests: 900,
@@ -100,6 +106,8 @@ describe('downstream api keys routes', () => {
       item: {
         id: keyId,
         name: 'portal-key-updated',
+        groupName: '项目B',
+        tags: ['批量候选', 'VIP'],
         enabled: false,
         maxCost: 20,
         maxRequests: 900,
@@ -201,6 +209,57 @@ describe('downstream api keys routes', () => {
     expect(await db.select().from(schema.downstreamApiKeys).all()).toHaveLength(0);
   });
 
+  it('supports batch metadata update for group and tags', async () => {
+    const inserted = await db.insert(schema.downstreamApiKeys).values([
+      {
+        name: 'meta-a',
+        key: 'sk-meta-a-001',
+        groupName: '旧分组',
+        tags: JSON.stringify(['旧标签']),
+        enabled: true,
+      },
+      {
+        name: 'meta-b',
+        key: 'sk-meta-b-001',
+        tags: JSON.stringify(['旧标签', '公共']),
+        enabled: true,
+      },
+    ]).returning().all();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/downstream-keys/batch',
+      payload: {
+        ids: inserted.map((item) => item.id),
+        action: 'updateMetadata',
+        groupOperation: 'set',
+        groupName: '新分组',
+        tagOperation: 'append',
+        tags: ['项目A', '公共'],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      success: true,
+      successIds: inserted.map((item) => item.id),
+      failedItems: [],
+    });
+
+    const rows = await db.select().from(schema.downstreamApiKeys).all();
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.groupName).toBe('新分组');
+    }
+    const views = rows.map((row) => ({
+      id: row.id,
+      groupName: row.groupName,
+      tags: JSON.parse(String(row.tags || '[]')),
+    }));
+    expect(views).toContainEqual(expect.objectContaining({ tags: ['旧标签', '项目A', '公共'] }));
+    expect(views).toContainEqual(expect.objectContaining({ tags: ['旧标签', '公共', '项目A'] }));
+  });
+
   it('rejects duplicate key creation and invalid batch action', async () => {
     const firstRes = await app.inject({
       method: 'POST',
@@ -298,6 +357,9 @@ describe('downstream api keys routes', () => {
       range: '24h',
       status: 'enabled',
       search: 'analytics',
+      group: '',
+      tags: [],
+      tagMatch: 'any',
       items: [
         {
           id: inserted.id,
@@ -415,6 +477,20 @@ describe('downstream api keys routes', () => {
     expect(updateRes.json()).toMatchObject({
       success: false,
       message: 'siteWeightMultipliers 包含不存在的站点: 999',
+    });
+
+    const filteredSummaryRes = await app.inject({
+      method: 'GET',
+      url: '/api/downstream-keys/summary?range=all&group=__ungrouped__&tags=foo,bar&tagMatch=all',
+    });
+    expect(filteredSummaryRes.statusCode).toBe(200);
+    expect(filteredSummaryRes.json()).toMatchObject({
+      success: true,
+      range: 'all',
+      group: '__ungrouped__',
+      tags: ['foo', 'bar'],
+      tagMatch: 'all',
+      items: [],
     });
   });
 });

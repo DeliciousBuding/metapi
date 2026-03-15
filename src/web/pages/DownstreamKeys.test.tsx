@@ -74,6 +74,8 @@ function buildSummaryItem(overrides?: Partial<any>) {
     keyMasked: 'sk-s****0315',
     enabled: true,
     description: 'local smoke',
+    groupName: '项目A',
+    tags: ['移动端', 'VIP'],
     expiresAt: null,
     maxCost: null,
     usedCost: 0,
@@ -104,6 +106,8 @@ function buildRawItem(overrides?: Partial<any>) {
     key: 'sk-smoke-0315',
     keyMasked: 'sk-s****0315',
     description: 'local smoke',
+    groupName: '项目A',
+    tags: ['移动端', 'VIP'],
     enabled: true,
     expiresAt: null,
     maxCost: null,
@@ -184,6 +188,8 @@ describe('DownstreamKeys page', () => {
       expect(text).toContain('sk-s****0315');
       expect(text).toContain('默认群组');
       expect(text).toContain('4.2K');
+      expect(text).toContain('主分组');
+      expect(text).toContain('移动端');
     } finally {
       root?.unmount();
     }
@@ -218,7 +224,7 @@ describe('DownstreamKeys page', () => {
       });
       await flushMicrotasks();
 
-      const input = root!.root.findAllByType('input').find((node) => node.props.placeholder === '搜索名称、备注、模型或群组');
+      const input = root!.root.findAllByType('input').find((node) => node.props.placeholder === '搜索名称、备注、模型、主分组或标签');
       await act(async () => {
         input!.props.onChange({ target: { value: 'batch' } });
       });
@@ -226,7 +232,7 @@ describe('DownstreamKeys page', () => {
       expect(collectText(root!.root)).toContain('batch-key');
       expect(collectText(root!.root)).not.toContain('smoke-key');
 
-      const select = root!.root.findByType('select');
+      const select = root!.root.findAllByType('select').find((node) => collectText(node).includes('仅禁用'));
       await act(async () => {
         select.props.onChange({ target: { value: 'disabled' } });
       });
@@ -323,6 +329,105 @@ describe('DownstreamKeys page', () => {
         ids: [1],
         action: 'enable',
       });
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('supports group and tag editing plus batch metadata update', async () => {
+    let root: ReturnType<typeof create> | null = null;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/downstream-keys']}>
+            <ToastProvider>
+              <DownstreamKeys />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const createBtn = root!.root.findAll((node) => node.type === 'button' && collectText(node).includes('新增下游密钥'))[0];
+      await act(async () => {
+        createBtn.props.onClick();
+      });
+      await flushMicrotasks();
+
+      const inputs = root!.root.findAllByType('input');
+      const nameInput = inputs.find((node) => node.props.placeholder === '例如：项目 A / 移动端');
+      const keyInput = inputs.find((node) => node.props.placeholder === 'sk-...');
+      const groupInput = inputs.find((node) => node.props.placeholder === '例如：VIP / 内部项目 / A组');
+      const tagInput = inputs.find((node) => node.props.placeholder === '输入标签后按回车或逗号，例如：移动端、VIP、项目A');
+      await act(async () => {
+        nameInput!.props.onChange({ target: { value: 'grouped-key' } });
+        keyInput!.props.onChange({ target: { value: 'sk-grouped-key-0315' } });
+        groupInput!.props.onChange({ target: { value: '项目B' } });
+        tagInput!.props.onChange({ target: { value: '灰度,高优' } });
+      });
+      await flushMicrotasks();
+      await act(async () => {
+        tagInput!.props.onKeyDown({ key: 'Enter', preventDefault: vi.fn() });
+      });
+      await flushMicrotasks();
+
+      const saveBtn = root!.root.findAll((node) => node.type === 'button' && collectText(node).includes('创建密钥'))[0];
+      await act(async () => {
+        saveBtn.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.createDownstreamApiKey).toHaveBeenCalledWith(expect.objectContaining({
+        groupName: '项目B',
+        tags: ['灰度', '高优'],
+      }));
+
+      const checkbox = root!.root.findAllByType('input').find((node) => node.props.type === 'checkbox' && typeof node.props.onChange === 'function' && node.props.checked === false);
+      await act(async () => {
+        checkbox!.props.onChange({ target: { checked: true } });
+      });
+      await flushMicrotasks();
+
+      const batchMetadataBtn = root!.root.findAll((node) => node.type === 'button' && collectText(node).includes('批量归类/标签'))[0];
+      await act(async () => {
+        batchMetadataBtn.props.onClick();
+      });
+      await flushMicrotasks();
+
+      const groupModeSelect = root!.root.findAllByType('select').find((node) => Array.isArray(node.props.children) && collectText(node).includes('统一设为主分组'));
+      const tagModeSelect = root!.root.findAllByType('select').find((node) => Array.isArray(node.props.children) && collectText(node).includes('追加标签'));
+      await act(async () => {
+        groupModeSelect!.props.onChange({ target: { value: 'set' } });
+        tagModeSelect!.props.onChange({ target: { value: 'append' } });
+      });
+      await flushMicrotasks();
+
+      const batchGroupInput = root!.root.findAllByType('input').find((node) => node.props.placeholder === '例如：VIP / 内部项目');
+      const batchTagInput = root!.root.findAllByType('input').find((node) => node.props.placeholder === '批量追加标签');
+      await act(async () => {
+        batchGroupInput!.props.onChange({ target: { value: '统一项目组' } });
+        batchTagInput!.props.onChange({ target: { value: '批量标签' } });
+      });
+      await flushMicrotasks();
+      await act(async () => {
+        batchTagInput!.props.onKeyDown({ key: 'Enter', preventDefault: vi.fn() });
+      });
+      await flushMicrotasks();
+
+      const applyBtn = root!.root.findAll((node) => node.type === 'button' && collectText(node).includes('应用到所选密钥'))[0];
+      await act(async () => {
+        applyBtn.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.batchDownstreamApiKeys).toHaveBeenCalledWith(expect.objectContaining({
+        ids: [1],
+        action: 'updateMetadata',
+        groupOperation: 'set',
+        groupName: '统一项目组',
+        tagOperation: 'append',
+        tags: ['批量标签'],
+      }));
     } finally {
       root?.unmount();
     }
