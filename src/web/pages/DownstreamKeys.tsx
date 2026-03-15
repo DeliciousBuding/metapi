@@ -37,19 +37,28 @@ type SummaryItem = {
   };
 };
 
+type AggregateUsage = {
+  totalRequests: number;
+  successRequests: number;
+  failedRequests: number;
+  successRate: number | null;
+  totalTokens: number;
+  totalCost: number;
+};
+
 type OverviewResponse = {
   success: boolean;
   item: SummaryItem;
   usage: null | {
-    last24h: any;
-    last7d: any;
-    all: any;
+    last24h: AggregateUsage | null;
+    last7d: AggregateUsage | null;
+    all: AggregateUsage | null;
   };
 };
 
 function formatIso(value: string | null | undefined): string {
   const text = (value || '').trim();
-  if (!text) return '—';
+  if (!text) return '--';
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) return text;
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -185,8 +194,7 @@ function Drawer({
     api.getDownstreamApiKeyTrend(item.id, { range: trendRange })
       .then((res: any) => {
         if (cancelled) return;
-        const nextBuckets = Array.isArray(res?.buckets) ? res.buckets : [];
-        setBuckets(nextBuckets);
+        setBuckets(Array.isArray(res?.buckets) ? res.buckets : []);
       })
       .catch((err: any) => {
         if (cancelled) return;
@@ -224,7 +232,7 @@ function Drawer({
         <div className="modal-header" style={{ paddingTop: 18, paddingBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span>{item?.name || '—'}</span>
+              <span>{item?.name || '--'}</span>
               <StatusBadge enabled={!!item?.enabled} />
             </div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
@@ -293,7 +301,7 @@ function Drawer({
               </div>
               <div>
                 <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>成功率</div>
-                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{item?.rangeUsage?.successRate == null ? '—' : `${item.rangeUsage.successRate}%`}</div>
+                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{item?.rangeUsage?.successRate == null ? '--' : `${item.rangeUsage.successRate}%`}</div>
               </div>
               <div>
                 <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>成本</div>
@@ -301,6 +309,34 @@ function Drawer({
               </div>
             </div>
           </div>
+
+          {overview?.usage ? (
+            <>
+              <div style={{ height: 16 }} />
+              <div className="card" style={{ padding: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: 10 }}>
+                  固定窗口对比
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, fontSize: 12 }}>
+                  {[
+                    { label: '24h', data: overview.usage.last24h },
+                    { label: '7d', data: overview.usage.last7d },
+                    { label: '全部', data: overview.usage.all },
+                  ].map((section) => (
+                    <div key={section.label} style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)', padding: 12 }}>
+                      <div style={{ color: 'var(--color-text-primary)', fontWeight: 700, marginBottom: 8 }}>{section.label}</div>
+                      <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>Tokens</div>
+                      <div style={{ color: 'var(--color-text-primary)', fontWeight: 700, marginBottom: 8 }}>{formatCompactTokens(section.data?.totalTokens || 0)}</div>
+                      <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>请求数</div>
+                      <div style={{ color: 'var(--color-text-primary)', fontWeight: 700, marginBottom: 8 }}>{(section.data?.totalRequests || 0).toLocaleString()}</div>
+                      <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>成功率</div>
+                      <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{section.data?.successRate == null ? '--' : `${section.data.successRate}%`}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
     </div>
@@ -331,8 +367,7 @@ export default function DownstreamKeys() {
     api.getDownstreamApiKeysSummary({ range, status, search: deferredSearch || undefined })
       .then((res: any) => {
         if (cancelled) return;
-        const nextItems = Array.isArray(res?.items) ? res.items : [];
-        setItems(nextItems);
+        setItems(Array.isArray(res?.items) ? res.items : []);
       })
       .catch((err: any) => {
         if (cancelled) return;
@@ -363,7 +398,7 @@ export default function DownstreamKeys() {
             {tr('下游 API Key')}
           </div>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
-            {tr('按 Key 查看请求数、tokens 与成本趋势（24h / 7d / 全部）')}
+            {tr('按 Key 查看请求数、Tokens 与成本趋势（24h / 7d / 全部）')}
           </div>
         </div>
         <RangeToggle range={range} onChange={setRange} />
@@ -441,7 +476,7 @@ export default function DownstreamKeys() {
                       ) : null}
                     </td>
                     <td><StatusBadge enabled={row.enabled} /></td>
-                    <td style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace', color: 'var(--color-text-muted)' }}>
+                    <td style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace', color: 'var(--color-text-muted)' }}>
                       {row.keyMasked}
                     </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-primary)', fontWeight: 700 }}>
@@ -451,7 +486,7 @@ export default function DownstreamKeys() {
                       {(row.rangeUsage?.totalRequests || 0).toLocaleString()}
                     </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      {row.rangeUsage?.successRate == null ? '—' : `${row.rangeUsage.successRate}%`}
+                      {row.rangeUsage?.successRate == null ? '--' : `${row.rangeUsage.successRate}%`}
                     </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                       {formatMoney(Number(row.rangeUsage?.totalCost || 0))}
@@ -476,4 +511,3 @@ export default function DownstreamKeys() {
     </div>
   );
 }
-

@@ -1,0 +1,253 @@
+import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
+
+type DbModule = typeof import('../../db/index.js');
+
+describe('downstream api keys routes', () => {
+  let app: FastifyInstance;
+  let db: DbModule['db'];
+  let schema: DbModule['schema'];
+  let dataDir = '';
+
+  beforeAll(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'metapi-downstream-routes-'));
+    process.env.DATA_DIR = dataDir;
+
+    await import('../../db/migrate.js');
+    const dbModule = await import('../../db/index.js');
+    const routesModule = await import('./downstreamApiKeys.js');
+    db = dbModule.db;
+    schema = dbModule.schema;
+
+    app = Fastify();
+    await app.register(routesModule.downstreamApiKeysRoutes);
+  });
+
+  beforeEach(async () => {
+    await db.delete(schema.proxyLogs).run();
+    await db.delete(schema.downstreamApiKeys).run();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    delete process.env.DATA_DIR;
+  });
+
+  it('creates, updates, resets and deletes downstream api keys', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/downstream-keys',
+      payload: {
+        name: 'portal-key',
+        key: 'sk-portal-key-001',
+        description: 'portal consumer',
+        enabled: true,
+        maxCost: 12.5,
+        maxRequests: 500,
+        supportedModels: ['gpt-5.2', 'claude-sonnet-4-5'],
+        allowedRouteIds: [11, 22],
+        siteWeightMultipliers: { 1: 1.2 },
+      },
+    });
+
+    expect(createRes.statusCode).toBe(200);
+    const createdBody = createRes.json();
+    expect(createdBody.success).toBe(true);
+    expect(createdBody.item).toMatchObject({
+      name: 'portal-key',
+      keyMasked: expect.any(String),
+      maxCost: 12.5,
+      maxRequests: 500,
+      supportedModels: ['gpt-5.2', 'claude-sonnet-4-5'],
+      allowedRouteIds: [11, 22],
+    });
+
+    const keyId = createdBody.item.id as number;
+
+    const updateRes = await app.inject({
+      method: 'PUT',
+      url: `/api/downstream-keys/${keyId}`,
+      payload: {
+        name: 'portal-key-updated',
+        key: 'sk-portal-key-001',
+        enabled: false,
+        maxCost: 20,
+        maxRequests: 900,
+      },
+    });
+
+    expect(updateRes.statusCode).toBe(200);
+    expect(updateRes.json()).toMatchObject({
+      success: true,
+      item: {
+        id: keyId,
+        name: 'portal-key-updated',
+        enabled: false,
+        maxCost: 20,
+        maxRequests: 900,
+      },
+    });
+
+    await db.update(schema.downstreamApiKeys).set({
+      usedCost: 5.5,
+      usedRequests: 123,
+    }).where(eq(schema.downstreamApiKeys.id, keyId)).run();
+
+    const resetRes = await app.inject({
+      method: 'POST',
+      url: `/api/downstream-keys/${keyId}/reset-usage`,
+    });
+
+    expect(resetRes.statusCode).toBe(200);
+    expect(resetRes.json()).toMatchObject({ success: true });
+
+    const resetRow = await db.select().from(schema.downstreamApiKeys)
+      .where(eq(schema.downstreamApiKeys.id, keyId))
+      .get();
+    expect(resetRow?.usedCost).toBe(0);
+    expect(resetRow?.usedRequests).toBe(0);
+
+    const deleteRes = await app.inject({
+      method: 'DELETE',
+      url: `/api/downstream-keys/${keyId}`,
+    });
+
+    expect(deleteRes.statusCode).toBe(200);
+    expect(deleteRes.json()).toMatchObject({ success: true });
+
+    const listRes = await app.inject({
+      method: 'GET',
+      url: '/api/downstream-keys',
+    });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json()).toMatchObject({ success: true, items: [] });
+  });
+
+  it('returns summary, overview and trend aggregated from proxy logs', async () => {
+    const inserted = await db.insert(schema.downstreamApiKeys).values({
+      name: 'analytics-key',
+      key: 'sk-analytics-key-001',
+      enabled: true,
+      description: 'analytics',
+      usedCost: 0,
+      usedRequests: 0,
+    }).returning().get();
+
+    const now = Date.now();
+    const within24h = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+    const within7d = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const outside7d = new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString();
+
+    await db.insert(schema.proxyLogs).values([
+      {
+        downstreamApiKeyId: inserted.id,
+        status: 'success',
+        totalTokens: 1200,
+        estimatedCost: 0.12,
+        createdAt: within24h,
+      },
+      {
+        downstreamApiKeyId: inserted.id,
+        status: 'failed',
+        totalTokens: 300,
+        estimatedCost: 0.03,
+        createdAt: within24h,
+      },
+      {
+        downstreamApiKeyId: inserted.id,
+        status: 'success',
+        totalTokens: 600,
+        estimatedCost: 0.06,
+        createdAt: within7d,
+      },
+      {
+        downstreamApiKeyId: inserted.id,
+        status: 'success',
+        totalTokens: 900,
+        estimatedCost: 0.09,
+        createdAt: outside7d,
+      },
+    ]).run();
+
+    const summaryRes = await app.inject({
+      method: 'GET',
+      url: '/api/downstream-keys/summary?range=24h&status=enabled&search=analytics',
+    });
+
+    expect(summaryRes.statusCode).toBe(200);
+    expect(summaryRes.json()).toMatchObject({
+      success: true,
+      range: '24h',
+      status: 'enabled',
+      search: 'analytics',
+      items: [
+        {
+          id: inserted.id,
+          name: 'analytics-key',
+          rangeUsage: {
+            totalRequests: 2,
+            successRequests: 1,
+            failedRequests: 1,
+            successRate: 50,
+            totalTokens: 1500,
+            totalCost: 0.15,
+          },
+        },
+      ],
+    });
+
+    const overviewRes = await app.inject({
+      method: 'GET',
+      url: `/api/downstream-keys/${inserted.id}/overview`,
+    });
+
+    expect(overviewRes.statusCode).toBe(200);
+    expect(overviewRes.json()).toMatchObject({
+      success: true,
+      item: { id: inserted.id, name: 'analytics-key' },
+      usage: {
+        last24h: {
+          totalRequests: 2,
+          successRequests: 1,
+          failedRequests: 1,
+          totalTokens: 1500,
+          totalCost: 0.15,
+        },
+        last7d: {
+          totalRequests: 3,
+          successRequests: 2,
+          failedRequests: 1,
+          totalTokens: 2100,
+          totalCost: 0.21,
+        },
+        all: {
+          totalRequests: 4,
+          successRequests: 3,
+          failedRequests: 1,
+          totalTokens: 3000,
+          totalCost: 0.3,
+        },
+      },
+    });
+
+    const trendRes = await app.inject({
+      method: 'GET',
+      url: `/api/downstream-keys/${inserted.id}/trend?range=all`,
+    });
+
+    expect(trendRes.statusCode).toBe(200);
+    const trendBody = trendRes.json();
+    expect(trendBody.success).toBe(true);
+    expect(trendBody.range).toBe('all');
+    expect(trendBody.item).toMatchObject({ id: inserted.id, name: 'analytics-key' });
+    expect(Array.isArray(trendBody.buckets)).toBe(true);
+    expect(trendBody.buckets.length).toBeGreaterThanOrEqual(3);
+    expect(trendBody.buckets.some((bucket: any) => bucket.totalTokens === 1500)).toBe(true);
+    expect(trendBody.buckets.some((bucket: any) => bucket.totalTokens === 600)).toBe(true);
+    expect(trendBody.buckets.some((bucket: any) => bucket.totalTokens === 900)).toBe(true);
+  });
+});

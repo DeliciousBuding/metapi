@@ -203,4 +203,3 @@ const toggleBtnInactive: React.CSSProperties = {
   background: 'var(--color-bg-card)',
   color: 'var(--color-text-secondary)',
 };
-
