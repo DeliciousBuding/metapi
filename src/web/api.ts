@@ -404,6 +404,11 @@ export const api = {
   resetDownstreamApiKeyUsage: (id: number) => request(`/api/downstream-keys/${id}/reset-usage`, {
     method: 'POST',
   }),
+  getDownstreamApiKeysSummary: (params?: { range?: '24h' | '7d' | 'all'; status?: 'all' | 'enabled' | 'disabled'; search?: string }) =>
+    request(`/api/downstream-keys/summary${buildQueryString(params)}`),
+  getDownstreamApiKeyOverview: (id: number) => request(`/api/downstream-keys/${id}/overview`),
+  getDownstreamApiKeyTrend: (id: number, params?: { range?: '24h' | '7d' | 'all' }) =>
+    request(`/api/downstream-keys/${id}/trend${buildQueryString(params)}`),
   exportBackup: (type: 'all' | 'accounts' | 'preferences' = 'all') =>
     request(`/api/settings/backup/export?type=${encodeURIComponent(type)}`),
   importBackup: (data: any) =>

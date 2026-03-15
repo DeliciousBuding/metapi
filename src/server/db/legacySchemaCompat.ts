@@ -61,6 +61,7 @@ const LEGACY_COMPAT_COLUMNS = new Set([
   'proxy_video_tasks.last_upstream_status',
   'proxy_video_tasks.last_polled_at',
   'proxy_logs.billing_details',
+  'proxy_logs.downstream_api_key_id',
 ]);
 
 const LEGACY_COMPAT_INDEXES = new Set([
@@ -75,6 +76,7 @@ const LEGACY_COMPAT_INDEXES = new Set([
   'downstream_api_keys_name_idx',
   'downstream_api_keys_enabled_idx',
   'downstream_api_keys_expires_at_idx',
+  'proxy_logs_downstream_api_key_created_at_idx',
   ...SHARED_INDEX_COMPATIBILITY_SPECS.map((spec) => spec.indexName),
 ]);
 

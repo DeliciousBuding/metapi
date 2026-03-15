@@ -534,6 +534,12 @@
           "defaultValue": null,
           "primaryKey": false
         },
+        "downstream_api_key_id": {
+          "logicalType": "integer",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
         "model_requested": {
           "logicalType": "text",
           "notNull": false,
@@ -1266,6 +1272,15 @@
       "name": "proxy_logs_created_at_idx",
       "table": "proxy_logs",
       "columns": [
+        "created_at"
+      ],
+      "unique": false
+    },
+    {
+      "name": "proxy_logs_downstream_api_key_created_at_idx",
+      "table": "proxy_logs",
+      "columns": [
+        "downstream_api_key_id",
         "created_at"
       ],
       "unique": false

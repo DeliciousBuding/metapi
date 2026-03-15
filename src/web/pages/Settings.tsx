@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { useToast } from '../components/Toast.js';
 import ChangeKeyModal from '../components/ChangeKeyModal.js';
@@ -180,6 +181,7 @@ function resolveRouteBrandSource(route: RouteSelectorItem): string {
 }
 
 export default function Settings() {
+  const navigate = useNavigate();
   const [runtime, setRuntime] = useState<RuntimeSettings>({
     checkinCron: '0 8 * * *',
     balanceRefreshCron: '0 * * * *',
@@ -1068,6 +1070,9 @@ export default function Settings() {
             </button>
             <button onClick={loadDownstreamKeys} disabled={downstreamLoading} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
               {downstreamLoading ? '刷新中...' : '刷新列表'}
+            </button>
+            <button onClick={() => navigate('/downstream-keys')} className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }}>
+              打开管理页
             </button>
           </div>
 
