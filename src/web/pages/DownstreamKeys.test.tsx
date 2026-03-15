@@ -294,6 +294,17 @@ describe('DownstreamKeys page', () => {
       expect(apiMock.getDownstreamApiKeyOverview).toHaveBeenCalledWith(1);
       expect(apiMock.getDownstreamApiKeyTrend).toHaveBeenCalledWith(1, { range: '24h' });
       expect(collectText(root!.root)).toContain('trend:2');
+
+      const range7d = root!.root.findAll((node) => node.type === 'button' && collectText(node) === '7d')[0];
+      await act(async () => {
+        range7d.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.getDownstreamApiKeyTrend).toHaveBeenCalledWith(1, { range: '7d' });
+      expect(collectText(root!.root)).toContain('12.4K');
+      expect(collectText(root!.root)).toContain('9');
+      expect(collectText(root!.root)).toContain('88.9%');
     } finally {
       root?.unmount();
     }

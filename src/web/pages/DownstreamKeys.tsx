@@ -428,6 +428,16 @@ function SummaryMetric({
   );
 }
 
+function resolveOverviewUsageByRange(
+  overview: OverviewResponse | null,
+  range: Range,
+): AggregateUsage | null {
+  if (!overview?.usage) return null;
+  if (range === '24h') return overview.usage.last24h;
+  if (range === '7d') return overview.usage.last7d;
+  return overview.usage.all;
+}
+
 function TrendChartFallback({ height = 260 }: { height?: number }) {
   return (
     <div
@@ -630,6 +640,8 @@ function Drawer({
 
   if (!presence.shouldRender) return null;
 
+  const currentRangeUsage = resolveOverviewUsageByRange(overview, trendRange) || item?.rangeUsage || null;
+
   const panel = (
     <div
       className={`modal-backdrop ${presence.isVisible ? '' : 'is-closing'}`.trim()}
@@ -728,19 +740,19 @@ function Drawer({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 12 }}>
               <div>
                 <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>Tokens</div>
-                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{formatCompactTokens(item?.rangeUsage?.totalTokens || 0)}</div>
+                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{formatCompactTokens(currentRangeUsage?.totalTokens || 0)}</div>
               </div>
               <div>
                 <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>请求数</div>
-                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{(item?.rangeUsage?.totalRequests || 0).toLocaleString()}</div>
+                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{(currentRangeUsage?.totalRequests || 0).toLocaleString()}</div>
               </div>
               <div>
                 <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>成功率</div>
-                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{item?.rangeUsage?.successRate == null ? '--' : `${item.rangeUsage.successRate}%`}</div>
+                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{currentRangeUsage?.successRate == null ? '--' : `${currentRangeUsage.successRate}%`}</div>
               </div>
               <div>
                 <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>成本</div>
-                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{formatMoney(Number(item?.rangeUsage?.totalCost || 0))}</div>
+                <div style={{ color: 'var(--color-text-primary)', fontWeight: 700 }}>{formatMoney(Number(currentRangeUsage?.totalCost || 0))}</div>
               </div>
             </div>
           </div>

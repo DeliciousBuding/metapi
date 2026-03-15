@@ -162,11 +162,19 @@ export async function insertProxyLog(input: ProxyLogInsertInput): Promise<void> 
     ).run();
   } catch (error) {
     if (includeBillingDetails && isMissingBillingDetailsColumnError(error)) {
-      await db.insert(schema.proxyLogs).values(
-        includeDownstreamApiKeyId
-          ? { ...baseValues, downstreamApiKeyId: input.downstreamApiKeyId }
-          : baseValues,
-      ).run();
+      try {
+        await db.insert(schema.proxyLogs).values(
+          includeDownstreamApiKeyId
+            ? { ...baseValues, downstreamApiKeyId: input.downstreamApiKeyId }
+            : baseValues,
+        ).run();
+      } catch (fallbackError) {
+        if (includeDownstreamApiKeyId && isMissingDownstreamApiKeyIdColumnError(fallbackError)) {
+          await db.insert(schema.proxyLogs).values(baseValues).run();
+          return;
+        }
+        throw fallbackError;
+      }
       return;
     }
 
