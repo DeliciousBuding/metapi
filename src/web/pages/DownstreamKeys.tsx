@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import CenteredModal from '../components/CenteredModal.js';
@@ -6,8 +6,10 @@ import DeleteConfirmModal from '../components/DeleteConfirmModal.js';
 import { useToast } from '../components/Toast.js';
 import ModernSelect from '../components/ModernSelect.js';
 import { useAnimatedVisibility } from '../components/useAnimatedVisibility.js';
-import DownstreamKeyTrendChart, { type DownstreamKeyTrendBucket } from '../components/charts/DownstreamKeyTrendChart.js';
 import { tr } from '../i18n.js';
+
+const DownstreamKeyTrendChart = lazy(() => import('../components/charts/DownstreamKeyTrendChart.js'));
+type DownstreamKeyTrendBucket = import('../components/charts/DownstreamKeyTrendChart.js').DownstreamKeyTrendBucket;
 
 type Range = '24h' | '7d' | 'all';
 type Status = 'all' | 'enabled' | 'disabled';
@@ -426,6 +428,23 @@ function SummaryMetric({
   );
 }
 
+function TrendChartFallback({ height = 260 }: { height?: number }) {
+  return (
+    <div
+      style={{
+        background: 'var(--color-bg-card)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--color-border-light)',
+        boxShadow: 'var(--shadow-card)',
+        padding: 16,
+      }}
+    >
+      <div className="skeleton" style={{ width: 140, height: 28, borderRadius: 'var(--radius-sm)', marginBottom: 10 }} />
+      <div className="skeleton" style={{ width: '100%', height, borderRadius: 'var(--radius-sm)' }} />
+    </div>
+  );
+}
+
 function InlineToggle({
   value,
   onChange,
@@ -658,7 +677,9 @@ function Drawer({
             <RangeToggle range={trendRange} onChange={setTrendRange} />
           </div>
 
-          <DownstreamKeyTrendChart buckets={buckets} loading={trendLoading} height={260} />
+          <Suspense fallback={<TrendChartFallback height={260} />}>
+            <DownstreamKeyTrendChart buckets={buckets} loading={trendLoading} height={260} />
+          </Suspense>
 
           <div style={{ height: 16 }} />
 
