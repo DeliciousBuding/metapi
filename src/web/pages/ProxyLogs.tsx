@@ -759,7 +759,7 @@ export default function ProxyLogs() {
                   <MobileField label="站点" value={log.siteName || '-'} />
                   <MobileField
                     label="应用"
-                    value={resolvedClientKind ? renderClientKindBadge(resolvedClientKind, resolvedSessionId || null) : '-'}
+                    value={resolvedClientKind ? renderClientKindBadge(resolvedClientKind) : '未识别'}
                   />
                   {resolvedSessionId ? <MobileField label="会话" value={resolvedSessionId} /> : null}
                   {downstreamKeySummary ? <MobileField label="下游 Key" value={downstreamKeySummary} /> : null}
@@ -856,8 +856,8 @@ export default function ProxyLogs() {
                       </td>
                       <td>
                         {resolvedClientKind
-                          ? renderClientKindBadge(resolvedClientKind, resolvedSessionId || null)
-                          : <span style={{ color: 'var(--color-text-muted)' }}>-</span>}
+                          ? renderClientKindBadge(resolvedClientKind)
+                          : <span style={{ color: 'var(--color-text-muted)' }}>未识别</span>}
                       </td>
                       <td style={{ minWidth: 0 }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
