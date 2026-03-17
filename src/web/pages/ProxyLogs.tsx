@@ -108,6 +108,10 @@ function formatBillingDetailSummary(log: ProxyLogRenderItem) {
 }
 
 function renderDownstreamKeySummary(log: ProxyLogRenderItem) {
+  return log.downstreamKeyName ? `下游 Key: ${log.downstreamKeyName}` : null;
+}
+
+function renderDownstreamKeyDetailSummary(log: ProxyLogRenderItem) {
   const parts = [
     log.downstreamKeyName ? `下游 Key: ${log.downstreamKeyName}` : null,
     log.downstreamKeyGroupName ? `主分组: ${log.downstreamKeyGroupName}` : null,
@@ -743,6 +747,7 @@ export default function ProxyLogs() {
               const billingDetailSummary = detail ? formatBillingDetailSummary(detailLog) : null;
               const billingProcessLines = detail ? buildBillingProcessLines(detailLog) : [];
               const downstreamKeySummary = renderDownstreamKeySummary(detailLog);
+              const downstreamKeyDetailSummary = renderDownstreamKeyDetailSummary(detailLog);
               const isExpanded = expanded === log.id;
 
               return (
@@ -776,7 +781,7 @@ export default function ProxyLogs() {
                       {detailState?.loading && <div style={{ color: 'var(--color-text-muted)' }}>加载详情中...</div>}
                       {detailState?.error && <div style={{ color: 'var(--color-danger)' }}>{detailState.error}</div>}
                       {billingDetailSummary && <div style={{ color: 'var(--color-text-muted)' }}>{billingDetailSummary}</div>}
-                      {downstreamKeySummary && <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeySummary}</div>}
+                      {downstreamKeyDetailSummary && <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeyDetailSummary}</div>}
                       {billingProcessLines.length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                           {billingProcessLines.map((line, index) => (
@@ -830,6 +835,7 @@ export default function ProxyLogs() {
                 const billingDetailSummary = detail ? formatBillingDetailSummary(detailLog) : null;
                 const billingProcessLines = detail ? buildBillingProcessLines(detailLog) : [];
                 const downstreamKeySummary = renderDownstreamKeySummary(detailLog);
+                const downstreamKeyDetailSummary = renderDownstreamKeyDetailSummary(detailLog);
 
                 return (
                   <React.Fragment key={log.id}>
@@ -860,8 +866,8 @@ export default function ProxyLogs() {
                           : <span style={{ color: 'var(--color-text-muted)' }}>未识别</span>}
                       </td>
                       <td style={{ minWidth: 0 }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          <ModelBadge model={log.modelRequested} />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                          <ModelBadge model={log.modelRequested} style={{ alignSelf: 'flex-start' }} />
                           {downstreamKeySummary ? (
                             <div style={{
                               fontSize: 11,
@@ -869,6 +875,8 @@ export default function ProxyLogs() {
                               color: 'var(--color-text-muted)',
                               whiteSpace: 'normal',
                               overflowWrap: 'anywhere',
+                              alignSelf: 'stretch',
+                              width: '100%',
                             }}>
                               {downstreamKeySummary}
                             </div>
@@ -959,8 +967,8 @@ export default function ProxyLogs() {
                                     {billingDetailSummary && (
                                       <div style={{ color: 'var(--color-text-muted)' }}>{billingDetailSummary}</div>
                                     )}
-                                    {downstreamKeySummary && (
-                                      <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeySummary}</div>
+                                    {downstreamKeyDetailSummary && (
+                                      <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeyDetailSummary}</div>
                                     )}
                                   </div>
                                 </div>
