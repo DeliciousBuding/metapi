@@ -229,18 +229,18 @@ function formatClientKindLabel(clientKind: string | null | undefined): string {
 function resolveClientIconHint(clientKind: string | null | undefined): string | null {
   const normalized = String(clientKind || '').trim().toLowerCase();
   if (!normalized) return null;
-  if (normalized === 'codex') return 'openai';
-  if (normalized === 'claude_code') return 'claude-color';
+  if (normalized === 'codex') return 'codex';
+  if (normalized === 'claude_code') return 'claudecode';
   if (normalized === 'gemini_cli') return 'gemini-color';
   if (normalized === 'cursor') return 'cursor';
   if (normalized === 'cline') return 'cline';
-  if (normalized === 'kilocode') return 'kilo';
-  if (normalized === 'copilot_cli') return 'github';
-  if (normalized === 'cherrystudio') return 'cherry';
-  if (normalized === 'chatbox') return 'chatbox';
-  if (normalized === 'aider') return 'aider';
-  if (normalized === 'openwebui') return 'open-webui';
-  if (normalized === 'opencode') return 'open-code';
+  if (normalized === 'kilocode') return 'kilocode';
+  if (normalized === 'copilot_cli') return 'githubcopilot';
+  if (normalized === 'cherrystudio') return 'cherrystudio';
+  if (normalized === 'chatbox') return null;
+  if (normalized === 'aider') return null;
+  if (normalized === 'openwebui') return 'openwebui';
+  if (normalized === 'opencode') return 'opencode';
   if (normalized === 'openclaw') return 'openclaw';
   return normalized;
 }
