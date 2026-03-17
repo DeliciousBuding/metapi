@@ -808,13 +808,13 @@ export default function ProxyLogs() {
             })}
           </div>
         ) : (
-          <table className="data-table" style={{ display: 'inline-table', tableLayout: 'fixed' }}>
+          <table className="data-table" style={{ display: 'inline-table', tableLayout: 'fixed', width: 'max-content' }}>
             <thead>
               <tr>
                 <th style={{ width: 28 }} />
                 <th style={{ width: 150 }}>时间</th>
                 <th style={{ width: 140 }}>应用</th>
-                <th>模型</th>
+                <th style={{ width: 220 }}>模型</th>
                 <th style={{ width: 140 }}>站点</th>
                 <th style={{ width: 88 }}>{tr('状态')}</th>
                 <th style={{ width: 80, textAlign: 'center' }}>用时</th>
