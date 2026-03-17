@@ -17,14 +17,6 @@ import { formatDateTimeLocal } from './helpers/checkinLogTime.js';
 import ModernSelect from '../components/ModernSelect.js';
 import { parseProxyLogPathMeta } from './helpers/proxyLogPathMeta.js';
 import { tr } from '../i18n.js';
-import codexLogo from '../assets/client-logos/codex.svg';
-import clineLogo from '../assets/client-logos/cline.svg';
-import kilocodeLogo from '../assets/client-logos/kilocode.svg';
-import copilotLogo from '../assets/client-logos/copilot.svg';
-import chatboxLogo from '../assets/client-logos/chatbox.svg';
-import cherrystudioLogo from '../assets/client-logos/cherrystudio.svg';
-import aiderLogo from '../assets/client-logos/aider.svg';
-import openwebuiLogo from '../assets/client-logos/openwebui.svg';
 
 type ProxyLogRenderItem = ProxyLogListItem & {
   billingDetails?: ProxyLogBillingDetails;
@@ -234,17 +226,6 @@ function formatClientKindLabel(clientKind: string | null | undefined): string {
   return normalized || '-';
 }
 
-const CLIENT_KIND_LOGOS: Partial<Record<string, string>> = {
-  codex: codexLogo,
-  cline: clineLogo,
-  kilocode: kilocodeLogo,
-  copilot_cli: copilotLogo,
-  cherrystudio: cherrystudioLogo,
-  chatbox: chatboxLogo,
-  aider: aiderLogo,
-  openwebui: openwebuiLogo,
-};
-
 function resolveClientIconHint(clientKind: string | null | undefined): string | null {
   const normalized = String(clientKind || '').trim().toLowerCase();
   if (!normalized) return null;
@@ -252,7 +233,13 @@ function resolveClientIconHint(clientKind: string | null | undefined): string | 
   if (normalized === 'claude_code') return 'claude-color';
   if (normalized === 'gemini_cli') return 'gemini-color';
   if (normalized === 'cursor') return 'cursor';
+  if (normalized === 'cline') return 'cline';
+  if (normalized === 'kilocode') return 'kilo';
   if (normalized === 'copilot_cli') return 'github';
+  if (normalized === 'cherrystudio') return 'cherry';
+  if (normalized === 'chatbox') return 'chatbox';
+  if (normalized === 'aider') return 'aider';
+  if (normalized === 'openwebui') return 'open-webui';
   if (normalized === 'opencode') return 'open-code';
   if (normalized === 'openclaw') return 'openclaw';
   return normalized;
@@ -263,7 +250,6 @@ function renderClientKindBadge(clientKind: string | null | undefined, sessionId?
   if (!normalized) return null;
   const label = formatClientKindLabel(normalized);
   const iconHint = resolveClientIconHint(normalized);
-  const logo = CLIENT_KIND_LOGOS[normalized];
   return (
     <span style={{
       display: 'inline-flex',
@@ -279,21 +265,7 @@ function renderClientKindBadge(clientKind: string | null | undefined, sessionId?
       maxWidth: '100%',
     }}
     >
-      {logo ? (
-        <img
-          src={logo}
-          alt={label}
-          style={{
-            width: 13,
-            height: 13,
-            objectFit: 'contain',
-            flexShrink: 0,
-          }}
-          loading="lazy"
-        />
-      ) : (
-        <BrandGlyph icon={iconHint} fallbackText={label} size={12} />
-      )}
+      <BrandGlyph icon={iconHint} fallbackText={label} size={12} />
       <span>{label}</span>
       {sessionId ? (
         <span style={{
