@@ -1,13 +1,13 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { TextDecoder } from 'node:util';
 import { fetch } from 'undici';
-import { db, schema } from '../../db/index.js';
 import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 import { parseProxyUsage } from '../../services/proxyUsageParser.js';
 import { isModelAllowedByPolicyOrAllowedRoutes } from '../../services/downstreamApiKeyService.js';
 import { tokenRouter } from '../../services/tokenRouter.js';
 import { getDownstreamRoutingPolicy } from './downstreamPolicy.js';
 import { composeProxyLogMessage } from './logPathMeta.js';
+import { insertProxyLog } from '../../services/proxyLogStore.js';
 import {
   geminiGenerateContentTransformer,
 } from '../../transformers/gemini/generate-content/index.js';
@@ -120,10 +120,12 @@ async function logProxy(
       upstreamPath,
       errorMessage,
     });
-    await db.insert(schema.proxyLogs).values({
+    await insertProxyLog({
       routeId: selected.channel.routeId,
       channelId: selected.channel.id,
       accountId: selected.account.id,
+      downstreamPath,
+      upstreamPath,
       modelRequested,
       modelActual: selected.actualModel || modelRequested,
       status,
@@ -137,7 +139,7 @@ async function logProxy(
       errorMessage: normalizedErrorMessage,
       retryCount,
       createdAt,
-    }).run();
+    });
   } catch (error) {
     console.warn('[proxy/gemini] failed to write proxy log', error);
   }

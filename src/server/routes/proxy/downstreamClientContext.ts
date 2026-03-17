@@ -1,4 +1,11 @@
-export type DownstreamClientKind = 'generic' | 'codex' | 'claude_code';
+export type DownstreamClientKind =
+  | 'generic'
+  | 'codex'
+  | 'claude_code'
+  | 'gemini_cli'
+  | 'cursor'
+  | 'opencode'
+  | 'openclaw';
 
 export type DownstreamClientContext = {
   clientKind: DownstreamClientKind;
@@ -65,6 +72,13 @@ export function isCodexResponsesSurface(headers?: Record<string, unknown>): bool
 }
 
 const claudeCodeUserIdPattern = /^user_[0-9a-f]{64}_account__session_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const claudeCodeBetaPattern = /(?:^|,)\s*claude-code-\d{8}(?:\s*,|$)/i;
+const codexOriginators = new Set(['codex_cli_rs', 'codex_exec', 'codex_cli']);
+const codexUserAgentTokens = ['codex_exec', 'codex-cli', 'codex_cli'];
+const geminiCliUserAgentPattern = /^geminicli\//i;
+const cursorUserAgentPattern = /(?:^|[\s(])cursor(?:\/|[-_ ]agent)/i;
+const opencodeUserAgentPattern = /(?:^|[\s(])opencode(?:\/|[-_ ])/i;
+const openclawUserAgentPattern = /(?:^|[\s(])openclaw(?:\/|[-_ ])/i;
 
 export function extractClaudeCodeSessionId(userId: string): string | null {
   const trimmed = userId.trim();
@@ -78,11 +92,121 @@ export function extractClaudeCodeSessionId(userId: string): string | null {
   return sessionId || null;
 }
 
+function extractCodexSessionId(headers?: Record<string, unknown>): string | null {
+  return getHeaderValue(headers, 'session_id')
+    || getHeaderValue(headers, 'session-id')
+    || getHeaderValue(headers, 'x-session-id')
+    || getHeaderValue(headers, 'x-codex-session');
+}
+
+function hasClaudeCodeHeaderSignal(headers?: Record<string, unknown>): boolean {
+  if (!headers) return false;
+  const beta = getHeaderValue(headers, 'anthropic-beta');
+  if (beta && claudeCodeBetaPattern.test(beta)) return true;
+  const ua = getHeaderValue(headers, 'user-agent');
+  if (ua && ua.toLowerCase().includes('claude-cli/')) return true;
+  const dangerous = getHeaderValue(headers, 'anthropic-dangerous-direct-browser-access');
+  if (dangerous && dangerous.toLowerCase() === 'true') return true;
+  return false;
+}
+
+function hasCodexHeaderSignal(headers?: Record<string, unknown>): boolean {
+  if (!headers) return false;
+  const originator = getHeaderValue(headers, 'originator');
+  if (originator && codexOriginators.has(originator.toLowerCase())) return true;
+  const ua = getHeaderValue(headers, 'user-agent');
+  if (ua && codexUserAgentTokens.some((token) => ua.toLowerCase().includes(token))) return true;
+  return false;
+}
+
+function hasGeminiCliHeaderSignal(headers?: Record<string, unknown>): boolean {
+  if (!headers) return false;
+  const ua = getHeaderValue(headers, 'user-agent');
+  if (ua && geminiCliUserAgentPattern.test(ua)) return true;
+  if (getHeaderValue(headers, 'x-gemini-api-privileged-user-id')) return true;
+  return false;
+}
+
+function hasCursorHeaderSignal(headers?: Record<string, unknown>): boolean {
+  if (!headers) return false;
+  if (getHeaderValue(headers, 'x-cursor-client-version')) return true;
+  const ua = getHeaderValue(headers, 'user-agent');
+  if (ua && cursorUserAgentPattern.test(ua)) return true;
+  return false;
+}
+
+function hasOpencodeHeaderSignal(headers?: Record<string, unknown>): boolean {
+  if (!headers) return false;
+  if (getHeaderValue(headers, 'x-opencode-directory')) return true;
+  if (getHeaderValue(headers, 'x-opencode-workspace')) return true;
+  const ua = getHeaderValue(headers, 'user-agent');
+  if (ua && opencodeUserAgentPattern.test(ua)) return true;
+  return false;
+}
+
+function hasOpenclawHeaderSignal(headers?: Record<string, unknown>): boolean {
+  if (!headers) return false;
+  const ua = getHeaderValue(headers, 'user-agent');
+  if (ua && openclawUserAgentPattern.test(ua)) return true;
+  const referer = getHeaderValue(headers, 'http-referer');
+  const title = getHeaderValue(headers, 'x-title');
+  if (referer && referer.toLowerCase().includes('openclaw.ai') && title?.toLowerCase() === 'openclaw') {
+    return true;
+  }
+  return false;
+}
+
 export function detectDownstreamClientContext(input: {
   downstreamPath: string;
   headers?: Record<string, unknown>;
   body?: unknown;
 }): DownstreamClientContext {
+  if (hasClaudeCodeHeaderSignal(input.headers)) {
+    let sessionId: string | null = null;
+    if (isRecord(input.body) && isRecord(input.body.metadata)) {
+      const userId = typeof input.body.metadata.user_id === 'string'
+        ? input.body.metadata.user_id.trim()
+        : '';
+      sessionId = userId ? extractClaudeCodeSessionId(userId) : null;
+    }
+    if (sessionId) {
+      return {
+        clientKind: 'claude_code',
+        sessionId,
+        traceHint: sessionId,
+      };
+    }
+    return { clientKind: 'claude_code' };
+  }
+
+  if (hasCodexHeaderSignal(input.headers)) {
+    const sessionId = extractCodexSessionId(input.headers);
+    if (sessionId) {
+      return {
+        clientKind: 'codex',
+        sessionId,
+        traceHint: sessionId,
+      };
+    }
+    return { clientKind: 'codex' };
+  }
+
+  if (hasGeminiCliHeaderSignal(input.headers)) {
+    return { clientKind: 'gemini_cli' };
+  }
+
+  if (hasCursorHeaderSignal(input.headers)) {
+    return { clientKind: 'cursor' };
+  }
+
+  if (hasOpencodeHeaderSignal(input.headers)) {
+    return { clientKind: 'opencode' };
+  }
+
+  if (hasOpenclawHeaderSignal(input.headers)) {
+    return { clientKind: 'openclaw' };
+  }
+
   const normalizedPath = input.downstreamPath.trim().toLowerCase();
 
   if (normalizedPath === '/v1/messages' || normalizedPath === '/anthropic/v1/messages') {

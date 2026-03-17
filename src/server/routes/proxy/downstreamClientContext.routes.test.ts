@@ -17,12 +17,7 @@ const resolveProxyUsageWithSelfLogFallbackMock = vi.fn(async ({ usage }: any) =>
   estimatedCostFromQuota: 0,
   recoveredFromSelfLog: false,
 }));
-const dbValuesMock = vi.fn((_arg?: any) => ({
-  run: () => undefined,
-}));
-const dbInsertMock = vi.fn((_arg?: any) => ({
-  values: (arg: any) => dbValuesMock(arg),
-}));
+const insertProxyLogMock = vi.fn(async (_arg?: any) => undefined);
 
 vi.mock('undici', () => ({
   fetch: (...args: unknown[]) => fetchMock(...args),
@@ -65,12 +60,11 @@ vi.mock('../../services/proxyUsageFallbackService.js', () => ({
 }));
 
 vi.mock('../../db/index.js', () => ({
-  db: {
-    insert: (arg: any) => dbInsertMock(arg),
-  },
-  schema: {
-    proxyLogs: {},
-  },
+  hasProxyLogDownstreamApiKeyIdColumn: async () => false,
+}));
+
+vi.mock('../../services/proxyLogStore.js', () => ({
+  insertProxyLog: (arg: any) => insertProxyLogMock(arg),
 }));
 
 describe('downstream client context route logging', () => {
@@ -97,8 +91,7 @@ describe('downstream client context route logging', () => {
     buildProxyBillingDetailsMock.mockClear();
     fetchModelPricingCatalogMock.mockReset();
     resolveProxyUsageWithSelfLogFallbackMock.mockClear();
-    dbInsertMock.mockClear();
-    dbValuesMock.mockClear();
+    insertProxyLogMock.mockClear();
 
     selectChannelMock.mockReturnValue({
       channel: { id: 11, routeId: 22 },
@@ -141,8 +134,11 @@ describe('downstream client context route logging', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(dbValuesMock).toHaveBeenCalled();
-    const insertedLog = dbValuesMock.mock.calls.at(-1)?.[0];
+    expect(insertProxyLogMock).toHaveBeenCalled();
+    const insertedLog = insertProxyLogMock.mock.calls.at(-1)?.[0];
+    expect(insertedLog.clientKind).toBe('codex');
+    expect(insertedLog.clientSessionId).toBe('codex-session-123');
+    expect(insertedLog.downstreamPath).toBe('/v1/responses');
     expect(insertedLog.errorMessage).toContain('[client:codex]');
     expect(insertedLog.errorMessage).toContain('[session:codex-session-123]');
     expect(insertedLog.errorMessage).toContain('[downstream:/v1/responses]');
@@ -173,8 +169,11 @@ describe('downstream client context route logging', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(dbValuesMock).toHaveBeenCalled();
-    const insertedLog = dbValuesMock.mock.calls.at(-1)?.[0];
+    expect(insertProxyLogMock).toHaveBeenCalled();
+    const insertedLog = insertProxyLogMock.mock.calls.at(-1)?.[0];
+    expect(insertedLog.clientKind).toBe('codex');
+    expect(insertedLog.clientSessionId).toBe('codex-session-compact');
+    expect(insertedLog.downstreamPath).toBe('/v1/responses/compact');
     expect(insertedLog.errorMessage).toContain('[client:codex]');
     expect(insertedLog.errorMessage).toContain('[session:codex-session-compact]');
     expect(insertedLog.errorMessage).toContain('[downstream:/v1/responses/compact]');
@@ -205,8 +204,11 @@ describe('downstream client context route logging', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(dbValuesMock).toHaveBeenCalled();
-    const insertedLog = dbValuesMock.mock.calls.at(-1)?.[0];
+    expect(insertProxyLogMock).toHaveBeenCalled();
+    const insertedLog = insertProxyLogMock.mock.calls.at(-1)?.[0];
+    expect(insertedLog.clientKind).toBe('claude_code');
+    expect(insertedLog.clientSessionId).toBe('f25958b8-e75c-455d-8b40-f006d87cc2a4');
+    expect(insertedLog.downstreamPath).toBe('/v1/messages');
     expect(insertedLog.errorMessage).toContain('[client:claude_code]');
     expect(insertedLog.errorMessage).toContain('[session:f25958b8-e75c-455d-8b40-f006d87cc2a4]');
     expect(insertedLog.errorMessage).toContain('[downstream:/v1/messages]');
@@ -237,8 +239,11 @@ describe('downstream client context route logging', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(dbValuesMock).toHaveBeenCalled();
-    const insertedLog = dbValuesMock.mock.calls.at(-1)?.[0];
+    expect(insertProxyLogMock).toHaveBeenCalled();
+    const insertedLog = insertProxyLogMock.mock.calls.at(-1)?.[0];
+    expect(insertedLog.clientKind).toBeNull();
+    expect(insertedLog.clientSessionId).toBeNull();
+    expect(insertedLog.downstreamPath).toBe('/v1/messages');
     expect(insertedLog.errorMessage).toContain('[downstream:/v1/messages]');
     expect(insertedLog.errorMessage).not.toContain('[client:');
     expect(insertedLog.errorMessage).not.toContain('[session:');

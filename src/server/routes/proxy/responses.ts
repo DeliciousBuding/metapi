@@ -1,6 +1,5 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { fetch } from 'undici';
-import { db, hasProxyLogDownstreamApiKeyIdColumn, schema } from '../../db/index.js';
 import { tokenRouter } from '../../services/tokenRouter.js';
 import { refreshModelsAndRebuildRoutes } from '../../services/modelService.js';
 import { reportProxyAllFailed, reportTokenExpired } from '../../services/alertService.js';
@@ -31,6 +30,7 @@ import {
   buildCodexOauthProviderHeaders,
   refreshCodexOauthAccessToken,
 } from '../../services/oauth/service.js';
+import { insertProxyLog } from '../../services/proxyLogStore.js';
 
 const MAX_RETRIES = 2;
 
@@ -152,8 +152,6 @@ export async function responsesProxyRoute(app: FastifyInstance) {
     if (!await ensureModelAllowedForDownstreamKey(request, reply, requestedModel)) return;
     const downstreamPolicy = getDownstreamRoutingPolicy(request);
     const downstreamApiKeyId = getProxyAuthContext(request)?.keyId ?? null;
-    const logDownstreamApiKeyId = downstreamApiKeyId !== null
-      && await hasProxyLogDownstreamApiKeyIdColumn();
     const excludeChannelIds: number[] = [];
     let retryCount = 0;
 
@@ -337,7 +335,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
               null,
               null,
               clientContext,
-              logDownstreamApiKeyId ? downstreamApiKeyId : null,
+              downstreamApiKeyId,
             );
           },
         });
@@ -362,7 +360,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
             null,
             null,
             clientContext,
-            logDownstreamApiKeyId ? downstreamApiKeyId : null,
+            downstreamApiKeyId,
           );
 
           if (isTokenExpiredError({ status, message: errText })) {
@@ -455,7 +453,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
             resolvedUsage.promptTokens, resolvedUsage.completionTokens, resolvedUsage.totalTokens, estimatedCost, billingDetails,
             successfulUpstreamPath,
             clientContext,
-            logDownstreamApiKeyId ? downstreamApiKeyId : null,
+            downstreamApiKeyId,
           );
           return;
         }
@@ -510,7 +508,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
           resolvedUsage.promptTokens, resolvedUsage.completionTokens, resolvedUsage.totalTokens, estimatedCost, billingDetails,
           successfulUpstreamPath,
           clientContext,
-          logDownstreamApiKeyId ? downstreamApiKeyId : null,
+          downstreamApiKeyId,
         );
         return reply.send(downstreamData);
       } catch (err: any) {
@@ -531,7 +529,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
           null,
           null,
           clientContext,
-          logDownstreamApiKeyId ? downstreamApiKeyId : null,
+          downstreamApiKeyId,
         );
         if (retryCount < MAX_RETRIES) {
           retryCount += 1;
@@ -584,11 +582,18 @@ async function logProxy(
       upstreamPath,
       errorMessage,
     });
-    await db.insert(schema.proxyLogs).values({
+    await insertProxyLog({
       routeId: selected.channel.routeId,
       channelId: selected.channel.id,
       accountId: selected.account.id,
-      ...(downstreamApiKeyId !== null ? { downstreamApiKeyId } : {}),
+      downstreamApiKeyId,
+      clientKind: clientContext?.clientKind && clientContext.clientKind !== 'generic'
+        ? clientContext.clientKind
+        : null,
+      clientSessionId: clientContext?.sessionId || null,
+      clientTraceHint: clientContext?.traceHint || null,
+      downstreamPath,
+      upstreamPath,
       modelRequested,
       modelActual: selected.actualModel,
       status,
@@ -598,12 +603,14 @@ async function logProxy(
       completionTokens,
       totalTokens,
       estimatedCost,
-      billingDetails: billingDetails ? JSON.stringify(billingDetails) : null,
+      billingDetails: billingDetails ?? null,
       errorMessage: normalizedErrorMessage,
       retryCount,
       createdAt,
-    }).run();
+    });
   } catch (error) {
     console.warn('[proxy/responses] failed to write proxy log', error);
   }
 }
+
+

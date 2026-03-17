@@ -635,6 +635,36 @@
           "notNull": false,
           "defaultValue": null,
           "primaryKey": false
+        },
+        "client_kind": {
+          "logicalType": "text",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "client_session_id": {
+          "logicalType": "text",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "client_trace_hint": {
+          "logicalType": "text",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "downstream_path": {
+          "logicalType": "text",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "upstream_path": {
+          "logicalType": "text",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
         }
       }
     },
@@ -1287,6 +1317,15 @@
       "unique": false
     },
     {
+      "name": "proxy_logs_client_kind_created_at_idx",
+      "table": "proxy_logs",
+      "columns": [
+        "client_kind",
+        "created_at"
+      ],
+      "unique": false
+    },
+    {
       "name": "proxy_logs_created_at_idx",
       "table": "proxy_logs",
       "columns": [
@@ -1299,6 +1338,15 @@
       "table": "proxy_logs",
       "columns": [
         "downstream_api_key_id",
+        "created_at"
+      ],
+      "unique": false
+    },
+    {
+      "name": "proxy_logs_downstream_path_created_at_idx",
+      "table": "proxy_logs",
+      "columns": [
+        "downstream_path",
         "created_at"
       ],
       "unique": false

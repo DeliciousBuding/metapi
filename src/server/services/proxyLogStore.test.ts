@@ -2,14 +2,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   hasProxyLogBillingDetailsColumnMock,
+  hasProxyLogClientKindColumnMock,
+  hasProxyLogClientSessionIdColumnMock,
+  hasProxyLogClientTraceHintColumnMock,
   hasProxyLogDownstreamApiKeyIdColumnMock,
+  hasProxyLogDownstreamPathColumnMock,
+  hasProxyLogUpstreamPathColumnMock,
   dbInsertMock,
   dbInsertValuesMock,
   dbInsertRunMock,
   proxyLogsSchema,
 } = vi.hoisted(() => ({
   hasProxyLogBillingDetailsColumnMock: vi.fn(),
+  hasProxyLogClientKindColumnMock: vi.fn(),
+  hasProxyLogClientSessionIdColumnMock: vi.fn(),
+  hasProxyLogClientTraceHintColumnMock: vi.fn(),
   hasProxyLogDownstreamApiKeyIdColumnMock: vi.fn(),
+  hasProxyLogDownstreamPathColumnMock: vi.fn(),
+  hasProxyLogUpstreamPathColumnMock: vi.fn(),
   dbInsertMock: vi.fn(),
   dbInsertValuesMock: vi.fn(),
   dbInsertRunMock: vi.fn(),
@@ -18,6 +28,12 @@ const {
     routeId: 'route_id',
     channelId: 'channel_id',
     accountId: 'account_id',
+    downstreamApiKeyId: 'downstream_api_key_id',
+    clientKind: 'client_kind',
+    clientSessionId: 'client_session_id',
+    clientTraceHint: 'client_trace_hint',
+    downstreamPath: 'downstream_path',
+    upstreamPath: 'upstream_path',
     modelRequested: 'model_requested',
     modelActual: 'model_actual',
     status: 'status',
@@ -42,7 +58,12 @@ vi.mock('../db/index.js', () => ({
     proxyLogs: proxyLogsSchema,
   },
   hasProxyLogBillingDetailsColumn: (...args: unknown[]) => hasProxyLogBillingDetailsColumnMock(...args),
+  hasProxyLogClientKindColumn: (...args: unknown[]) => hasProxyLogClientKindColumnMock(...args),
+  hasProxyLogClientSessionIdColumn: (...args: unknown[]) => hasProxyLogClientSessionIdColumnMock(...args),
+  hasProxyLogClientTraceHintColumn: (...args: unknown[]) => hasProxyLogClientTraceHintColumnMock(...args),
   hasProxyLogDownstreamApiKeyIdColumn: (...args: unknown[]) => hasProxyLogDownstreamApiKeyIdColumnMock(...args),
+  hasProxyLogDownstreamPathColumn: (...args: unknown[]) => hasProxyLogDownstreamPathColumnMock(...args),
+  hasProxyLogUpstreamPathColumn: (...args: unknown[]) => hasProxyLogUpstreamPathColumnMock(...args),
 }));
 
 import { insertProxyLog, withProxyLogSelectFields } from './proxyLogStore.js';
@@ -50,12 +71,22 @@ import { insertProxyLog, withProxyLogSelectFields } from './proxyLogStore.js';
 describe('proxyLogStore', () => {
   beforeEach(() => {
     hasProxyLogBillingDetailsColumnMock.mockReset();
+    hasProxyLogClientKindColumnMock.mockReset();
+    hasProxyLogClientSessionIdColumnMock.mockReset();
+    hasProxyLogClientTraceHintColumnMock.mockReset();
     hasProxyLogDownstreamApiKeyIdColumnMock.mockReset();
+    hasProxyLogDownstreamPathColumnMock.mockReset();
+    hasProxyLogUpstreamPathColumnMock.mockReset();
     dbInsertMock.mockReset();
     dbInsertValuesMock.mockReset();
     dbInsertRunMock.mockReset();
     hasProxyLogBillingDetailsColumnMock.mockResolvedValue(false);
+    hasProxyLogClientKindColumnMock.mockResolvedValue(false);
+    hasProxyLogClientSessionIdColumnMock.mockResolvedValue(false);
+    hasProxyLogClientTraceHintColumnMock.mockResolvedValue(false);
     hasProxyLogDownstreamApiKeyIdColumnMock.mockResolvedValue(false);
+    hasProxyLogDownstreamPathColumnMock.mockResolvedValue(false);
+    hasProxyLogUpstreamPathColumnMock.mockResolvedValue(false);
 
     dbInsertMock.mockReturnValue({
       values: (...args: unknown[]) => dbInsertValuesMock(...args),
@@ -131,5 +162,33 @@ describe('proxyLogStore', () => {
     });
     expect(dbInsertValuesMock.mock.calls[2][0].billingDetails).toBeUndefined();
     expect(dbInsertValuesMock.mock.calls[2][0].downstreamApiKeyId).toBeUndefined();
+  });
+
+  it('drops structured traffic columns one by one when runtime schema lags behind', async () => {
+    hasProxyLogClientKindColumnMock.mockResolvedValue(true);
+    hasProxyLogClientSessionIdColumnMock.mockResolvedValue(true);
+    hasProxyLogDownstreamPathColumnMock.mockResolvedValue(true);
+    dbInsertRunMock
+      .mockRejectedValueOnce(new Error('column proxy_logs.client_kind does not exist'))
+      .mockRejectedValueOnce(new Error('column proxy_logs.client_session_id does not exist'))
+      .mockRejectedValueOnce(new Error('column proxy_logs.downstream_path does not exist'))
+      .mockResolvedValueOnce(undefined);
+
+    await insertProxyLog({
+      modelRequested: 'gpt-5',
+      clientKind: 'codex',
+      clientSessionId: 'session-1',
+      downstreamPath: '/v1/responses',
+    });
+
+    expect(dbInsertValuesMock).toHaveBeenCalledTimes(4);
+    expect(dbInsertValuesMock.mock.calls[0][0]).toMatchObject({
+      clientKind: 'codex',
+      clientSessionId: 'session-1',
+      downstreamPath: '/v1/responses',
+    });
+    expect(dbInsertValuesMock.mock.calls[3][0].clientKind).toBeUndefined();
+    expect(dbInsertValuesMock.mock.calls[3][0].clientSessionId).toBeUndefined();
+    expect(dbInsertValuesMock.mock.calls[3][0].downstreamPath).toBeUndefined();
   });
 });

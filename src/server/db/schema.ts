@@ -167,6 +167,11 @@ export const proxyLogs = sqliteTable('proxy_logs', {
   channelId: integer('channel_id'),
   accountId: integer('account_id'),
   downstreamApiKeyId: integer('downstream_api_key_id'),
+  clientKind: text('client_kind'),
+  clientSessionId: text('client_session_id'),
+  clientTraceHint: text('client_trace_hint'),
+  downstreamPath: text('downstream_path'),
+  upstreamPath: text('upstream_path'),
   modelRequested: text('model_requested'),
   modelActual: text('model_actual'),
   status: text('status'), // 'success' | 'failed' | 'retried'
@@ -186,6 +191,8 @@ export const proxyLogs = sqliteTable('proxy_logs', {
   statusCreatedIdx: index('proxy_logs_status_created_at_idx').on(table.status, table.createdAt),
   modelActualCreatedIdx: index('proxy_logs_model_actual_created_at_idx').on(table.modelActual, table.createdAt),
   downstreamKeyCreatedIdx: index('proxy_logs_downstream_api_key_created_at_idx').on(table.downstreamApiKeyId, table.createdAt),
+  clientKindCreatedIdx: index('proxy_logs_client_kind_created_at_idx').on(table.clientKind, table.createdAt),
+  downstreamPathCreatedIdx: index('proxy_logs_downstream_path_created_at_idx').on(table.downstreamPath, table.createdAt),
 }));
 
 export const proxyVideoTasks = sqliteTable('proxy_video_tasks', {

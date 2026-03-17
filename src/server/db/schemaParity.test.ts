@@ -90,5 +90,9 @@ describe('database schema parity', () => {
     expect(mysqlBootstrap).toContain('`proxy_logs_downstream_api_key_created_at_idx`');
     expect(postgresBootstrap).toContain('"downstream_api_key_id"');
     expect(postgresBootstrap).toContain('"proxy_logs_downstream_api_key_created_at_idx"');
+    expect(contract.tables.proxy_logs?.columns.client_kind?.logicalType).toBe('text');
+    expect(contract.tables.proxy_logs?.columns.downstream_path?.logicalType).toBe('text');
+    expect(contract.indexes.some((index) => index.name === 'proxy_logs_client_kind_created_at_idx')).toBe(true);
+    expect(contract.indexes.some((index) => index.name === 'proxy_logs_downstream_path_created_at_idx')).toBe(true);
   });
 });

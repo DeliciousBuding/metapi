@@ -42,6 +42,11 @@ let mysqlPool: mysql.Pool | null = null;
 let pgPool: pg.Pool | null = null;
 let proxyLogBillingDetailsColumnAvailable: boolean | null = null;
 let proxyLogDownstreamApiKeyIdColumnAvailable: boolean | null = null;
+let proxyLogClientKindColumnAvailable: boolean | null = null;
+let proxyLogClientSessionIdColumnAvailable: boolean | null = null;
+let proxyLogClientTraceHintColumnAvailable: boolean | null = null;
+let proxyLogDownstreamPathColumnAvailable: boolean | null = null;
+let proxyLogUpstreamPathColumnAvailable: boolean | null = null;
 
 function resolveSqlitePath(): string {
   const raw = (config.dbUrl || '').trim();
@@ -566,6 +571,37 @@ function ensureProxyLogDownstreamApiKeyIdSchema() {
   proxyLogDownstreamApiKeyIdColumnAvailable = true;
 }
 
+function ensureProxyLogTrafficLabelSchema() {
+  if (!tableExists('proxy_logs')) {
+    return;
+  }
+
+  if (!tableColumnExists('proxy_logs', 'client_kind')) {
+    execSqliteLegacyCompat('ALTER TABLE proxy_logs ADD COLUMN client_kind text;');
+  }
+  if (!tableColumnExists('proxy_logs', 'client_session_id')) {
+    execSqliteLegacyCompat('ALTER TABLE proxy_logs ADD COLUMN client_session_id text;');
+  }
+  if (!tableColumnExists('proxy_logs', 'client_trace_hint')) {
+    execSqliteLegacyCompat('ALTER TABLE proxy_logs ADD COLUMN client_trace_hint text;');
+  }
+  if (!tableColumnExists('proxy_logs', 'downstream_path')) {
+    execSqliteLegacyCompat('ALTER TABLE proxy_logs ADD COLUMN downstream_path text;');
+  }
+  if (!tableColumnExists('proxy_logs', 'upstream_path')) {
+    execSqliteLegacyCompat('ALTER TABLE proxy_logs ADD COLUMN upstream_path text;');
+  }
+
+  execSqliteLegacyCompat('CREATE INDEX IF NOT EXISTS proxy_logs_client_kind_created_at_idx ON proxy_logs(client_kind, created_at);');
+  execSqliteLegacyCompat('CREATE INDEX IF NOT EXISTS proxy_logs_downstream_path_created_at_idx ON proxy_logs(downstream_path, created_at);');
+
+  proxyLogClientKindColumnAvailable = true;
+  proxyLogClientSessionIdColumnAvailable = true;
+  proxyLogClientTraceHintColumnAvailable = true;
+  proxyLogDownstreamPathColumnAvailable = true;
+  proxyLogUpstreamPathColumnAvailable = true;
+}
+
 function normalizeSchemaErrorMessage(error: unknown): string {
   if (typeof error === 'object' && error && 'message' in error) {
     return String((error as { message?: unknown }).message || '');
@@ -671,6 +707,120 @@ export async function hasProxyLogDownstreamApiKeyIdColumn(): Promise<boolean> {
   return proxyLogDownstreamApiKeyIdColumnAvailable;
 }
 
+async function hasProxyLogTextColumnCached(
+  cacheKey: 'clientKind' | 'clientSessionId' | 'clientTraceHint' | 'downstreamPath' | 'upstreamPath',
+  columnName: string,
+): Promise<boolean> {
+  const getCached = () => {
+    if (cacheKey === 'clientKind') return proxyLogClientKindColumnAvailable;
+    if (cacheKey === 'clientSessionId') return proxyLogClientSessionIdColumnAvailable;
+    if (cacheKey === 'clientTraceHint') return proxyLogClientTraceHintColumnAvailable;
+    if (cacheKey === 'downstreamPath') return proxyLogDownstreamPathColumnAvailable;
+    return proxyLogUpstreamPathColumnAvailable;
+  };
+  const setCached = (value: boolean) => {
+    if (cacheKey === 'clientKind') proxyLogClientKindColumnAvailable = value;
+    else if (cacheKey === 'clientSessionId') proxyLogClientSessionIdColumnAvailable = value;
+    else if (cacheKey === 'clientTraceHint') proxyLogClientTraceHintColumnAvailable = value;
+    else if (cacheKey === 'downstreamPath') proxyLogDownstreamPathColumnAvailable = value;
+    else proxyLogUpstreamPathColumnAvailable = value;
+  };
+
+  const cached = getCached();
+  if (cached !== null) return cached;
+
+  if (runtimeDbDialect === 'sqlite') {
+    const value = tableExists('proxy_logs') && tableColumnExists('proxy_logs', columnName);
+    setCached(value);
+    return value;
+  }
+
+  if (runtimeDbDialect === 'mysql') {
+    if (!mysqlPool) return false;
+    const [rows] = await mysqlPool.query('SHOW COLUMNS FROM `proxy_logs` LIKE ?', [columnName]);
+    const value = Array.isArray(rows) && rows.length > 0;
+    setCached(value);
+    return value;
+  }
+
+  if (!pgPool) return false;
+  const result = await pgPool.query(
+    'SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2 LIMIT 1',
+    ['proxy_logs', columnName],
+  );
+  const value = Number(result.rowCount || 0) > 0;
+  setCached(value);
+  return value;
+}
+
+async function ensureProxyLogTextColumn(
+  cacheKey: 'clientKind' | 'clientSessionId' | 'clientTraceHint' | 'downstreamPath' | 'upstreamPath',
+  columnName: string,
+): Promise<boolean> {
+  const setCached = (value: boolean) => {
+    if (cacheKey === 'clientKind') proxyLogClientKindColumnAvailable = value;
+    else if (cacheKey === 'clientSessionId') proxyLogClientSessionIdColumnAvailable = value;
+    else if (cacheKey === 'clientTraceHint') proxyLogClientTraceHintColumnAvailable = value;
+    else if (cacheKey === 'downstreamPath') proxyLogDownstreamPathColumnAvailable = value;
+    else proxyLogUpstreamPathColumnAvailable = value;
+  };
+
+  if (runtimeDbDialect === 'sqlite') {
+    ensureProxyLogTrafficLabelSchema();
+    return hasProxyLogTextColumnCached(cacheKey, columnName);
+  }
+
+  if (await hasProxyLogTextColumnCached(cacheKey, columnName)) {
+    return true;
+  }
+
+  try {
+    if (runtimeDbDialect === 'mysql') {
+      if (!mysqlPool) return false;
+      await executeLegacyCompat(
+        (statement) => mysqlPool!.query(statement).then(() => undefined),
+        `ALTER TABLE \`proxy_logs\` ADD COLUMN \`${columnName}\` TEXT NULL`,
+      );
+    } else {
+      if (!pgPool) return false;
+      await executeLegacyCompat(
+        (statement) => pgPool!.query(statement).then(() => undefined),
+        `ALTER TABLE "proxy_logs" ADD COLUMN "${columnName}" TEXT`,
+      );
+    }
+    setCached(true);
+    return true;
+  } catch (error) {
+    if (isDuplicateColumnError(error)) {
+      setCached(true);
+      return true;
+    }
+    setCached(false);
+    console.warn(`[db] failed to ensure proxy_logs.${columnName} column`, error);
+    return false;
+  }
+}
+
+export async function hasProxyLogClientKindColumn(): Promise<boolean> {
+  return hasProxyLogTextColumnCached('clientKind', 'client_kind');
+}
+
+export async function hasProxyLogClientSessionIdColumn(): Promise<boolean> {
+  return hasProxyLogTextColumnCached('clientSessionId', 'client_session_id');
+}
+
+export async function hasProxyLogClientTraceHintColumn(): Promise<boolean> {
+  return hasProxyLogTextColumnCached('clientTraceHint', 'client_trace_hint');
+}
+
+export async function hasProxyLogDownstreamPathColumn(): Promise<boolean> {
+  return hasProxyLogTextColumnCached('downstreamPath', 'downstream_path');
+}
+
+export async function hasProxyLogUpstreamPathColumn(): Promise<boolean> {
+  return hasProxyLogTextColumnCached('upstreamPath', 'upstream_path');
+}
+
 export async function ensureProxyLogDownstreamApiKeyIdColumn(): Promise<boolean> {
   if (runtimeDbDialect === 'sqlite') {
     ensureProxyLogDownstreamApiKeyIdSchema();
@@ -710,9 +860,34 @@ export async function ensureProxyLogDownstreamApiKeyIdColumn(): Promise<boolean>
   }
 }
 
+export async function ensureProxyLogClientKindColumn(): Promise<boolean> {
+  return ensureProxyLogTextColumn('clientKind', 'client_kind');
+}
+
+export async function ensureProxyLogClientSessionIdColumn(): Promise<boolean> {
+  return ensureProxyLogTextColumn('clientSessionId', 'client_session_id');
+}
+
+export async function ensureProxyLogClientTraceHintColumn(): Promise<boolean> {
+  return ensureProxyLogTextColumn('clientTraceHint', 'client_trace_hint');
+}
+
+export async function ensureProxyLogDownstreamPathColumn(): Promise<boolean> {
+  return ensureProxyLogTextColumn('downstreamPath', 'downstream_path');
+}
+
+export async function ensureProxyLogUpstreamPathColumn(): Promise<boolean> {
+  return ensureProxyLogTextColumn('upstreamPath', 'upstream_path');
+}
+
 function resetSchemaCapabilityCache() {
   proxyLogBillingDetailsColumnAvailable = null;
   proxyLogDownstreamApiKeyIdColumnAvailable = null;
+  proxyLogClientKindColumnAvailable = null;
+  proxyLogClientSessionIdColumnAvailable = null;
+  proxyLogClientTraceHintColumnAvailable = null;
+  proxyLogDownstreamPathColumnAvailable = null;
+  proxyLogUpstreamPathColumnAvailable = null;
 }
 
 async function sqliteProxyQuery(sqlText: string, params: unknown[], method: SqlMethod) {
@@ -973,6 +1148,8 @@ function initSqliteDb() {
   ensureRouteGroupingSchema();
   ensureDownstreamApiKeySchema();
   ensureProxyLogBillingDetailsSchema();
+  ensureProxyLogDownstreamApiKeyIdSchema();
+  ensureProxyLogTrafficLabelSchema();
   ensureProxyVideoTaskSchema();
   ensureProxyFileSchema();
 

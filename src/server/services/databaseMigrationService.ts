@@ -449,13 +449,18 @@ function buildStatements(snapshot: BackupSnapshot): InsertStatement[] {
   for (const row of snapshot.accounts.proxyLogs) {
     statements.push({
       table: 'proxy_logs',
-      columns: ['id', 'route_id', 'channel_id', 'account_id', 'downstream_api_key_id', 'model_requested', 'model_actual', 'status', 'http_status', 'latency_ms', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'estimated_cost', 'billing_details', 'error_message', 'retry_count', 'created_at'],
+      columns: ['id', 'route_id', 'channel_id', 'account_id', 'downstream_api_key_id', 'client_kind', 'client_session_id', 'client_trace_hint', 'downstream_path', 'upstream_path', 'model_requested', 'model_actual', 'status', 'http_status', 'latency_ms', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'estimated_cost', 'billing_details', 'error_message', 'retry_count', 'created_at'],
       values: [
         asNumber(row.id, 0),
         asNumber(row.routeId, null),
         asNumber(row.channelId, null),
         asNumber(row.accountId, null),
         asNumber((row as any).downstreamApiKeyId ?? (row as any).downstream_api_key_id, null),
+        asNullableString((row as any).clientKind ?? (row as any).client_kind),
+        asNullableString((row as any).clientSessionId ?? (row as any).client_session_id),
+        asNullableString((row as any).clientTraceHint ?? (row as any).client_trace_hint),
+        asNullableString((row as any).downstreamPath ?? (row as any).downstream_path),
+        asNullableString((row as any).upstreamPath ?? (row as any).upstream_path),
         asNullableString(row.modelRequested),
         asNullableString(row.modelActual),
         asNullableString(row.status),

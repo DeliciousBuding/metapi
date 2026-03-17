@@ -1,6 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { tokenRouter } from '../../services/tokenRouter.js';
-import { db, hasProxyLogDownstreamApiKeyIdColumn, schema } from '../../db/index.js';
 import { fetch } from 'undici';
 import { refreshModelsAndRebuildRoutes } from '../../services/modelService.js';
 import { reportProxyAllFailed, reportTokenExpired } from '../../services/alertService.js';
@@ -36,6 +35,7 @@ import {
   buildCodexOauthProviderHeaders,
   refreshCodexOauthAccessToken,
 } from '../../services/oauth/service.js';
+import { insertProxyLog } from '../../services/proxyLogStore.js';
 
 const MAX_RETRIES = 2;
 
@@ -91,8 +91,6 @@ async function handleChatProxyRequest(
   }
   const hasNonImageFileInput = hasNonImageFileInputInOpenAiBody(resolvedOpenAiBody);
   const downstreamApiKeyId = getProxyAuthContext(request)?.keyId ?? null;
-  const logDownstreamApiKeyId = downstreamApiKeyId !== null
-    && await hasProxyLogDownstreamApiKeyIdColumn();
 
   const excludeChannelIds: number[] = [];
   let retryCount = 0;
@@ -245,7 +243,7 @@ async function handleChatProxyRequest(
           null,
           null,
           clientContext,
-          logDownstreamApiKeyId ? downstreamApiKeyId : null,
+          downstreamApiKeyId,
         );
       },
       });
@@ -270,7 +268,7 @@ async function handleChatProxyRequest(
           null,
           null,
           clientContext,
-          logDownstreamApiKeyId ? downstreamApiKeyId : null,
+          downstreamApiKeyId,
         );
 
         if (isTokenExpiredError({ status, message: errText })) {
@@ -390,7 +388,7 @@ async function handleChatProxyRequest(
             billingDetails,
             successfulUpstreamPath,
             clientContext,
-            logDownstreamApiKeyId ? downstreamApiKeyId : null,
+            downstreamApiKeyId,
           );
           return;
         }
@@ -441,7 +439,7 @@ async function handleChatProxyRequest(
           billingDetails,
           successfulUpstreamPath,
           clientContext,
-          logDownstreamApiKeyId ? downstreamApiKeyId : null,
+          downstreamApiKeyId,
         );
         return;
       }
@@ -501,7 +499,7 @@ async function handleChatProxyRequest(
         billingDetails,
         successfulUpstreamPath,
         clientContext,
-        logDownstreamApiKeyId ? downstreamApiKeyId : null,
+        downstreamApiKeyId,
       );
 
       return reply.send(downstreamResponse);
@@ -523,7 +521,7 @@ async function handleChatProxyRequest(
         null,
         null,
         clientContext,
-        logDownstreamApiKeyId ? downstreamApiKeyId : null,
+        downstreamApiKeyId,
       );
 
       if (retryCount < MAX_RETRIES) {
@@ -576,11 +574,18 @@ async function logProxy(
       upstreamPath,
       errorMessage,
     });
-    await db.insert(schema.proxyLogs).values({
+    await insertProxyLog({
       routeId: selected.channel.routeId,
       channelId: selected.channel.id,
       accountId: selected.account.id,
-      ...(downstreamApiKeyId !== null ? { downstreamApiKeyId } : {}),
+      downstreamApiKeyId,
+      clientKind: clientContext?.clientKind && clientContext.clientKind !== 'generic'
+        ? clientContext.clientKind
+        : null,
+      clientSessionId: clientContext?.sessionId || null,
+      clientTraceHint: clientContext?.traceHint || null,
+      downstreamPath,
+      upstreamPath,
       modelRequested,
       modelActual: selected.actualModel,
       status,
@@ -590,12 +595,14 @@ async function logProxy(
       completionTokens,
       totalTokens,
       estimatedCost,
-      billingDetails: billingDetails ? JSON.stringify(billingDetails) : null,
+      billingDetails: billingDetails ?? null,
       errorMessage: normalizedErrorMessage,
       retryCount,
       createdAt,
-    }).run();
+    });
   } catch (error) {
     console.warn('[proxy/chat] failed to write proxy log', error);
   }
 }
+
+
