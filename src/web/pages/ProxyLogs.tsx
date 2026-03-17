@@ -722,6 +722,7 @@ export default function ProxyLogs() {
             {[...Array(8)].map((_, i) => (
               <div key={i} style={{ display: 'flex', gap: 16 }}>
                 <div className="skeleton" style={{ width: 140, height: 16 }} />
+                <div className="skeleton" style={{ width: 120, height: 16 }} />
                 <div className="skeleton" style={{ width: 200, height: 16 }} />
                 <div className="skeleton" style={{ width: 50, height: 16 }} />
                 <div className="skeleton" style={{ width: 50, height: 16 }} />
@@ -807,6 +808,7 @@ export default function ProxyLogs() {
               <tr>
                 <th style={{ width: 28 }} />
                 <th>时间</th>
+                <th>应用</th>
                 <th>模型</th>
                 <th>站点</th>
                 <th>{tr('状态')}</th>
@@ -851,6 +853,11 @@ export default function ProxyLogs() {
                       </td>
                       <td style={{ fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-secondary)' }}>
                         {formatDateTimeLocal(log.createdAt)}
+                      </td>
+                      <td>
+                        {resolvedClientKind
+                          ? renderClientKindBadge(resolvedClientKind, resolvedSessionId || null)
+                          : <span style={{ color: 'var(--color-text-muted)' }}>-</span>}
                       </td>
                       <td>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -911,7 +918,7 @@ export default function ProxyLogs() {
                     </tr>
                     {expanded === log.id && (
                       <tr style={{ background: 'var(--color-bg)' }}>
-                        <td colSpan={10} style={{ padding: 0 }}>
+                        <td colSpan={11} style={{ padding: 0 }}>
                           <div className="anim-collapse is-open">
                             <div className="anim-collapse-inner">
                               <div className="animate-fade-in" style={{

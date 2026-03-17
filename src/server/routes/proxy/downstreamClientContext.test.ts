@@ -143,6 +143,17 @@ describe('detectDownstreamClientContext', () => {
     });
   });
 
+  it('recognizes Cherry Studio from condensed user-agent', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'User-Agent': 'CherryStudio/1.1.0',
+      },
+    })).toEqual({
+      clientKind: 'cherrystudio',
+    });
+  });
+
   it('recognizes Open WebUI from forwarded user headers', () => {
     expect(detectDownstreamClientContext({
       downstreamPath: '/v1/chat/completions',
