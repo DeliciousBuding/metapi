@@ -9,7 +9,7 @@ import {
   type ProxyLogStatusFilter,
 } from '../api.js';
 import { useToast } from '../components/Toast.js';
-import { ModelBadge } from '../components/BrandIcon.js';
+import { BrandGlyph, ModelBadge } from '../components/BrandIcon.js';
 import { MobileCard, MobileField } from '../components/MobileCard.js';
 import { MobileDrawer } from '../components/MobileDrawer.js';
 import { useIsMobile } from '../components/useIsMobile.js';
@@ -189,6 +189,57 @@ function formatClientKindLabel(clientKind: string | null | undefined): string {
   if (normalized === 'opencode') return 'Opencode';
   if (normalized === 'openclaw') return 'OpenClaw';
   return normalized || '-';
+}
+
+function resolveClientIconHint(clientKind: string | null | undefined): string | null {
+  const normalized = String(clientKind || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'codex') return 'openai';
+  if (normalized === 'claude_code') return 'claude-color';
+  if (normalized === 'gemini_cli') return 'gemini-color';
+  if (normalized === 'cursor') return 'cursor';
+  if (normalized === 'opencode') return 'open-code';
+  if (normalized === 'openclaw') return 'openclaw';
+  return normalized;
+}
+
+function renderClientKindBadge(clientKind: string | null | undefined, sessionId?: string | null) {
+  const normalized = String(clientKind || '').trim().toLowerCase();
+  if (!normalized) return null;
+  const label = formatClientKindLabel(normalized);
+  const iconHint = resolveClientIconHint(normalized);
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      padding: '2px 8px',
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: 600,
+      color: 'var(--color-text-secondary)',
+      background: 'var(--color-bg-card)',
+      border: '1px solid var(--color-border-light)',
+      maxWidth: '100%',
+    }}
+    >
+      <BrandGlyph icon={iconHint} fallbackText={label} size={12} />
+      <span>{label}</span>
+      {sessionId ? (
+        <span style={{
+          color: 'var(--color-text-muted)',
+          fontWeight: 500,
+          maxWidth: 160,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+        >
+          {sessionId}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function normalizeRouteDateTimeInput(raw: string | null): string {
@@ -673,7 +724,10 @@ export default function ProxyLogs() {
                 >
                   <MobileField label="时间" value={formatDateTimeLocal(log.createdAt)} />
                   <MobileField label="站点" value={log.siteName || '-'} />
-                  <MobileField label="应用" value={resolvedClientKind ? formatClientKindLabel(resolvedClientKind) : '-'} />
+                  <MobileField
+                    label="应用"
+                    value={resolvedClientKind ? renderClientKindBadge(resolvedClientKind, resolvedSessionId || null) : '-'}
+                  />
                   {resolvedSessionId ? <MobileField label="会话" value={resolvedSessionId} /> : null}
                   {downstreamKeySummary ? <MobileField label="下游 Key" value={downstreamKeySummary} /> : null}
                   <MobileField label="用时" value={formatLatency(log.latencyMs)} />
@@ -775,8 +829,8 @@ export default function ProxyLogs() {
                             </div>
                           ) : null}
                           {resolvedClientKind ? (
-                            <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--color-text-muted)' }}>
-                              应用: {formatClientKindLabel(resolvedClientKind)}{resolvedSessionId ? ` (${resolvedSessionId})` : ''}
+                            <div style={{ fontSize: 11, lineHeight: 1.45 }}>
+                              {renderClientKindBadge(resolvedClientKind, resolvedSessionId || null)}
                             </div>
                           ) : null}
                         </div>
