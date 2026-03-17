@@ -17,6 +17,7 @@ import { formatDateTimeLocal } from './helpers/checkinLogTime.js';
 import ModernSelect from '../components/ModernSelect.js';
 import { parseProxyLogPathMeta } from './helpers/proxyLogPathMeta.js';
 import { tr } from '../i18n.js';
+import codexLogo from '../assets/client-logos/codex.svg';
 
 type ProxyLogRenderItem = ProxyLogListItem & {
   billingDetails?: ProxyLogBillingDetails;
@@ -208,6 +209,7 @@ function renderClientKindBadge(clientKind: string | null | undefined, sessionId?
   if (!normalized) return null;
   const label = formatClientKindLabel(normalized);
   const iconHint = resolveClientIconHint(normalized);
+  const isCodex = normalized === 'codex';
   return (
     <span style={{
       display: 'inline-flex',
@@ -223,7 +225,21 @@ function renderClientKindBadge(clientKind: string | null | undefined, sessionId?
       maxWidth: '100%',
     }}
     >
-      <BrandGlyph icon={iconHint} fallbackText={label} size={12} />
+      {isCodex ? (
+        <img
+          src={codexLogo}
+          alt="Codex"
+          style={{
+            width: 13,
+            height: 13,
+            objectFit: 'contain',
+            flexShrink: 0,
+          }}
+          loading="lazy"
+        />
+      ) : (
+        <BrandGlyph icon={iconHint} fallbackText={label} size={12} />
+      )}
       <span>{label}</span>
       {sessionId ? (
         <span style={{
