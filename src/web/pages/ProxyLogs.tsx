@@ -221,17 +221,17 @@ function formatClientKindLabel(clientKind: string | null | undefined): string {
 function resolveClientIconHint(clientKind: string | null | undefined): string | null {
   const normalized = String(clientKind || '').trim().toLowerCase();
   if (!normalized) return null;
-  if (normalized === 'codex') return 'codex';
-  if (normalized === 'claude_code') return 'claudecode';
+  if (normalized === 'codex') return 'codex-color';
+  if (normalized === 'claude_code') return 'claudecode-color';
   if (normalized === 'gemini_cli') return 'gemini-color';
   if (normalized === 'cursor') return 'cursor';
   if (normalized === 'cline') return 'cline';
   if (normalized === 'kilocode') return 'kilocode';
-  if (normalized === 'copilot_cli') return 'githubcopilot';
-  if (normalized === 'cherrystudio') return 'cherrystudio';
+  if (normalized === 'copilot_cli') return 'copilot-color';
+  if (normalized === 'cherrystudio') return 'cherrystudio-color';
   if (normalized === 'openwebui') return 'openwebui';
   if (normalized === 'opencode') return 'opencode';
-  if (normalized === 'openclaw') return 'openclaw';
+  if (normalized === 'openclaw') return 'openclaw-color';
   return normalized;
 }
 
