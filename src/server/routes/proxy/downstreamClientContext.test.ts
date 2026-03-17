@@ -143,38 +143,14 @@ describe('detectDownstreamClientContext', () => {
     });
   });
 
-  it('recognizes Chatbox from session headers or openrouter app headers', () => {
+  it('recognizes Cherry Studio from condensed user-agent', () => {
     expect(detectDownstreamClientContext({
       downstreamPath: '/v1/chat/completions',
       headers: {
-        'chatbox-session-id': 'chatbox-session-1',
+        'User-Agent': 'CherryStudio/1.1.0',
       },
     })).toEqual({
-      clientKind: 'chatbox',
-      sessionId: 'chatbox-session-1',
-      traceHint: 'chatbox-session-1',
-    });
-
-    expect(detectDownstreamClientContext({
-      downstreamPath: '/v1/chat/completions',
-      headers: {
-        'HTTP-Referer': 'https://chatboxai.app',
-        'X-Title': 'Chatbox AI',
-      },
-    })).toEqual({
-      clientKind: 'chatbox',
-    });
-  });
-
-  it('recognizes Aider from openrouter app headers', () => {
-    expect(detectDownstreamClientContext({
-      downstreamPath: '/v1/chat/completions',
-      headers: {
-        'HTTP-Referer': 'https://aider.chat',
-        'X-Title': 'Aider',
-      },
-    })).toEqual({
-      clientKind: 'aider',
+      clientKind: 'cherrystudio',
     });
   });
 

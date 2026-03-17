@@ -23,6 +23,12 @@ function collectText(node: ReactTestInstance): string {
   }).join('');
 }
 
+function collectHeaderLabels(root: ReactTestInstance): string[] {
+  return root.findAll((node) => node.type === 'th')
+    .map((node) => collectText(node).trim())
+    .filter(Boolean);
+}
+
 async function flushMicrotasks() {
   await act(async () => {
     await Promise.resolve();
@@ -177,6 +183,16 @@ describe('ProxyLogs server-driven page', () => {
       expect(text).toContain('失败 4');
       expect(text).toContain('下游 Key: 移动端灰度');
       expect(text).toContain('Codex');
+
+      const headers = collectHeaderLabels(root!.root);
+      const timeIndex = headers.indexOf('时间');
+      const appIndex = headers.indexOf('应用');
+      const modelIndex = headers.indexOf('模型');
+      expect(timeIndex).toBeGreaterThanOrEqual(0);
+      expect(appIndex).toBeGreaterThanOrEqual(0);
+      expect(modelIndex).toBeGreaterThanOrEqual(0);
+      expect(timeIndex).toBeLessThan(appIndex);
+      expect(appIndex).toBeLessThan(modelIndex);
     } finally {
       root?.unmount();
     }

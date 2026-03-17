@@ -6,5 +6,6 @@ describe('ProxyLogs mobile layout', () => {
   it('renders mobile cards for proxy logs', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/web/pages/ProxyLogs.tsx'), 'utf8');
     expect(source).toContain('MobileCard');
+    expect(source).toContain('label="应用"');
   });
 });
