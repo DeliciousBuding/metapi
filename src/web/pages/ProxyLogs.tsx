@@ -803,20 +803,20 @@ export default function ProxyLogs() {
             })}
           </div>
         ) : (
-          <table className="data-table" style={{ width: '100%' }}>
+          <table className="data-table" style={{ width: '100%', tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th style={{ width: 28 }} />
-                <th>时间</th>
-                <th>应用</th>
+                <th style={{ width: 150 }}>时间</th>
+                <th style={{ width: 140 }}>应用</th>
                 <th>模型</th>
-                <th>站点</th>
-                <th>{tr('状态')}</th>
-                <th style={{ textAlign: 'center' }}>用时</th>
-                <th style={{ textAlign: 'right' }}>输入</th>
-                <th style={{ textAlign: 'right' }}>输出</th>
-                <th style={{ textAlign: 'right' }}>花费</th>
-                <th style={{ textAlign: 'center' }}>重试</th>
+                <th style={{ width: 140 }}>站点</th>
+                <th style={{ width: 88 }}>{tr('状态')}</th>
+                <th style={{ width: 80, textAlign: 'center' }}>用时</th>
+                <th style={{ width: 70, textAlign: 'right' }}>输入</th>
+                <th style={{ width: 70, textAlign: 'right' }}>输出</th>
+                <th style={{ width: 90, textAlign: 'right' }}>花费</th>
+                <th style={{ width: 70, textAlign: 'center' }}>重试</th>
               </tr>
             </thead>
             <tbody>
@@ -859,11 +859,17 @@ export default function ProxyLogs() {
                           ? renderClientKindBadge(resolvedClientKind, resolvedSessionId || null)
                           : <span style={{ color: 'var(--color-text-muted)' }}>-</span>}
                       </td>
-                      <td>
+                      <td style={{ minWidth: 0 }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                           <ModelBadge model={log.modelRequested} />
                           {downstreamKeySummary ? (
-                            <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--color-text-muted)' }}>
+                            <div style={{
+                              fontSize: 11,
+                              lineHeight: 1.45,
+                              color: 'var(--color-text-muted)',
+                              whiteSpace: 'normal',
+                              overflowWrap: 'anywhere',
+                            }}>
                               {downstreamKeySummary}
                             </div>
                           ) : null}
