@@ -808,7 +808,7 @@ export default function ProxyLogs() {
             })}
           </div>
         ) : (
-          <table className="data-table" style={{ width: '100%', tableLayout: 'fixed' }}>
+          <table className="data-table" style={{ display: 'inline-table', tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th style={{ width: 28 }} />
