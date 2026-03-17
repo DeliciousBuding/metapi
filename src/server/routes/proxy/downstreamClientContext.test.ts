@@ -84,6 +84,88 @@ describe('detectDownstreamClientContext', () => {
     });
   });
 
+  it('recognizes Cline from originator and user-agent headers', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/responses',
+      headers: {
+        originator: 'cline',
+        'User-Agent': 'cline/1.2.3 (linux)',
+        session_id: 'cline-session-123',
+      },
+    })).toEqual({
+      clientKind: 'cline',
+      sessionId: 'cline-session-123',
+      traceHint: 'cline-session-123',
+    });
+  });
+
+  it('recognizes KiloCode from user-agent and x-kilocode headers', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'User-Agent': 'opencode-kilo-provider',
+      },
+    })).toEqual({
+      clientKind: 'kilocode',
+    });
+
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'x-kilocode-editorname': 'Kilo CLI',
+      },
+    })).toEqual({
+      clientKind: 'kilocode',
+    });
+  });
+
+  it('recognizes Copilot headers', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'Copilot-Integration-Id': 'vscode-chat',
+        'User-Agent': 'GitHubCopilotChat/0.26.7',
+        'Editor-Plugin-Version': 'copilot-chat/0.26.7',
+      },
+    })).toEqual({
+      clientKind: 'copilot_cli',
+    });
+  });
+
+  it('recognizes Cherry Studio from user-agent', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'User-Agent': 'CherryAI',
+      },
+    })).toEqual({
+      clientKind: 'cherrystudio',
+    });
+  });
+
+  it('recognizes Cherry Studio from condensed user-agent', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'User-Agent': 'CherryStudio/1.1.0',
+      },
+    })).toEqual({
+      clientKind: 'cherrystudio',
+    });
+  });
+
+  it('recognizes Open WebUI from forwarded user headers', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'X-OpenWebUI-User-Id': 'user-123',
+        'X-OpenWebUI-Chat-Id': 'chat-456',
+      },
+    })).toEqual({
+      clientKind: 'openwebui',
+    });
+  });
+
   it('recognizes Cursor from client version or user-agent', () => {
     expect(detectDownstreamClientContext({
       downstreamPath: '/v1/chat/completions',

@@ -9,7 +9,7 @@ import {
   type ProxyLogStatusFilter,
 } from '../api.js';
 import { useToast } from '../components/Toast.js';
-import { ModelBadge } from '../components/BrandIcon.js';
+import { BrandGlyph, ModelBadge } from '../components/BrandIcon.js';
 import { MobileCard, MobileField } from '../components/MobileCard.js';
 import { MobileDrawer } from '../components/MobileDrawer.js';
 import { useIsMobile } from '../components/useIsMobile.js';
@@ -34,13 +34,30 @@ type ProxyLogDetailState = {
 
 const PAGE_SIZES = [20, 50, 100];
 const DEFAULT_PAGE_SIZE = 50;
-type ProxyLogClientKindFilter = 'all' | 'codex' | 'claude_code' | 'gemini_cli' | 'cursor' | 'opencode' | 'openclaw';
+type ProxyLogClientKindFilter =
+  | 'all'
+  | 'codex'
+  | 'claude_code'
+  | 'gemini_cli'
+  | 'cursor'
+  | 'cline'
+  | 'kilocode'
+  | 'copilot_cli'
+  | 'cherrystudio'
+  | 'openwebui'
+  | 'opencode'
+  | 'openclaw';
 const CLIENT_KIND_FILTER_OPTIONS: Array<{ value: ProxyLogClientKindFilter; label: string }> = [
   { value: 'all', label: '全部应用' },
   { value: 'codex', label: 'Codex' },
   { value: 'claude_code', label: 'Claude Code' },
   { value: 'gemini_cli', label: 'Gemini CLI' },
   { value: 'cursor', label: 'Cursor' },
+  { value: 'cline', label: 'Cline' },
+  { value: 'kilocode', label: 'KiloCode' },
+  { value: 'copilot_cli', label: 'Copilot CLI' },
+  { value: 'cherrystudio', label: 'Cherry Studio' },
+  { value: 'openwebui', label: 'Open WebUI' },
   { value: 'opencode', label: 'Opencode' },
   { value: 'openclaw', label: 'OpenClaw' },
 ];
@@ -91,6 +108,10 @@ function formatBillingDetailSummary(log: ProxyLogRenderItem) {
 }
 
 function renderDownstreamKeySummary(log: ProxyLogRenderItem) {
+  return log.downstreamKeyName ? `下游 Key: ${log.downstreamKeyName}` : null;
+}
+
+function renderDownstreamKeyDetailSummary(log: ProxyLogRenderItem) {
   const parts = [
     log.downstreamKeyName ? `下游 Key: ${log.downstreamKeyName}` : null,
     log.downstreamKeyGroupName ? `主分组: ${log.downstreamKeyGroupName}` : null,
@@ -175,6 +196,11 @@ function normalizeRouteClientKind(raw: string | null): ProxyLogClientKindFilter 
   if (normalized === 'claude_code') return 'claude_code';
   if (normalized === 'gemini_cli') return 'gemini_cli';
   if (normalized === 'cursor') return 'cursor';
+  if (normalized === 'cline') return 'cline';
+  if (normalized === 'kilocode') return 'kilocode';
+  if (normalized === 'copilot_cli') return 'copilot_cli';
+  if (normalized === 'cherrystudio') return 'cherrystudio';
+  if (normalized === 'openwebui') return 'openwebui';
   if (normalized === 'opencode') return 'opencode';
   if (normalized === 'openclaw') return 'openclaw';
   return 'all';
@@ -186,9 +212,70 @@ function formatClientKindLabel(clientKind: string | null | undefined): string {
   if (normalized === 'claude_code') return 'Claude Code';
   if (normalized === 'gemini_cli') return 'Gemini CLI';
   if (normalized === 'cursor') return 'Cursor';
+  if (normalized === 'cline') return 'Cline';
+  if (normalized === 'kilocode') return 'KiloCode';
+  if (normalized === 'copilot_cli') return 'Copilot CLI';
+  if (normalized === 'cherrystudio') return 'Cherry Studio';
+  if (normalized === 'openwebui') return 'Open WebUI';
   if (normalized === 'opencode') return 'Opencode';
   if (normalized === 'openclaw') return 'OpenClaw';
   return normalized || '-';
+}
+
+function resolveClientIconHint(clientKind: string | null | undefined): string | null {
+  const normalized = String(clientKind || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'codex') return 'codex-color';
+  if (normalized === 'claude_code') return 'claudecode-color';
+  if (normalized === 'gemini_cli') return 'gemini-color';
+  if (normalized === 'cursor') return 'cursor';
+  if (normalized === 'cline') return 'cline';
+  if (normalized === 'kilocode') return 'kilocode';
+  if (normalized === 'copilot_cli') return 'copilot-color';
+  if (normalized === 'cherrystudio') return 'cherrystudio-color';
+  if (normalized === 'openwebui') return 'openwebui';
+  if (normalized === 'opencode') return 'opencode';
+  if (normalized === 'openclaw') return 'openclaw-color';
+  return normalized;
+}
+
+function renderClientKindBadge(clientKind: string | null | undefined, sessionId?: string | null) {
+  const normalized = String(clientKind || '').trim().toLowerCase();
+  if (!normalized) return null;
+  const label = formatClientKindLabel(normalized);
+  const iconHint = resolveClientIconHint(normalized);
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      padding: '2px 8px',
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: 600,
+      color: 'var(--color-text-secondary)',
+      background: 'var(--color-bg-card)',
+      border: '1px solid var(--color-border-light)',
+      maxWidth: '100%',
+    }}
+    >
+      <BrandGlyph icon={iconHint} fallbackText={label} size={12} />
+      <span>{label}</span>
+      {sessionId ? (
+        <span style={{
+          color: 'var(--color-text-muted)',
+          fontWeight: 500,
+          maxWidth: 160,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+        >
+          {sessionId}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function normalizeRouteDateTimeInput(raw: string | null): string {
@@ -639,6 +726,7 @@ export default function ProxyLogs() {
             {[...Array(8)].map((_, i) => (
               <div key={i} style={{ display: 'flex', gap: 16 }}>
                 <div className="skeleton" style={{ width: 140, height: 16 }} />
+                <div className="skeleton" style={{ width: 120, height: 16 }} />
                 <div className="skeleton" style={{ width: 200, height: 16 }} />
                 <div className="skeleton" style={{ width: 50, height: 16 }} />
                 <div className="skeleton" style={{ width: 50, height: 16 }} />
@@ -659,6 +747,7 @@ export default function ProxyLogs() {
               const billingDetailSummary = detail ? formatBillingDetailSummary(detailLog) : null;
               const billingProcessLines = detail ? buildBillingProcessLines(detailLog) : [];
               const downstreamKeySummary = renderDownstreamKeySummary(detailLog);
+              const downstreamKeyDetailSummary = renderDownstreamKeyDetailSummary(detailLog);
               const isExpanded = expanded === log.id;
 
               return (
@@ -673,7 +762,10 @@ export default function ProxyLogs() {
                 >
                   <MobileField label="时间" value={formatDateTimeLocal(log.createdAt)} />
                   <MobileField label="站点" value={log.siteName || '-'} />
-                  <MobileField label="应用" value={resolvedClientKind ? formatClientKindLabel(resolvedClientKind) : '-'} />
+                  <MobileField
+                    label="应用"
+                    value={resolvedClientKind ? renderClientKindBadge(resolvedClientKind) : '未识别'}
+                  />
                   {resolvedSessionId ? <MobileField label="会话" value={resolvedSessionId} /> : null}
                   {downstreamKeySummary ? <MobileField label="下游 Key" value={downstreamKeySummary} /> : null}
                   <MobileField label="用时" value={formatLatency(log.latencyMs)} />
@@ -689,7 +781,7 @@ export default function ProxyLogs() {
                       {detailState?.loading && <div style={{ color: 'var(--color-text-muted)' }}>加载详情中...</div>}
                       {detailState?.error && <div style={{ color: 'var(--color-danger)' }}>{detailState.error}</div>}
                       {billingDetailSummary && <div style={{ color: 'var(--color-text-muted)' }}>{billingDetailSummary}</div>}
-                      {downstreamKeySummary && <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeySummary}</div>}
+                      {downstreamKeyDetailSummary && <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeyDetailSummary}</div>}
                       {billingProcessLines.length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                           {billingProcessLines.map((line, index) => (
@@ -716,11 +808,25 @@ export default function ProxyLogs() {
             })}
           </div>
         ) : (
-          <table className="data-table" style={{ width: '100%' }}>
+          <table className="data-table" style={{ width: '100%', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '2%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '8%' }} />
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ width: 28 }} />
+                <th />
                 <th>时间</th>
+                <th>应用</th>
                 <th>模型</th>
                 <th>站点</th>
                 <th>{tr('状态')}</th>
@@ -742,6 +848,7 @@ export default function ProxyLogs() {
                 const billingDetailSummary = detail ? formatBillingDetailSummary(detailLog) : null;
                 const billingProcessLines = detail ? buildBillingProcessLines(detailLog) : [];
                 const downstreamKeySummary = renderDownstreamKeySummary(detailLog);
+                const downstreamKeyDetailSummary = renderDownstreamKeyDetailSummary(detailLog);
 
                 return (
                   <React.Fragment key={log.id}>
@@ -767,22 +874,32 @@ export default function ProxyLogs() {
                         {formatDateTimeLocal(log.createdAt)}
                       </td>
                       <td>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          <ModelBadge model={log.modelRequested} />
+                        {resolvedClientKind
+                          ? renderClientKindBadge(resolvedClientKind)
+                          : <span style={{ color: 'var(--color-text-muted)' }}>未识别</span>}
+                      </td>
+                      <td style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                          <ModelBadge model={log.modelRequested} style={{ alignSelf: 'flex-start' }} />
                           {downstreamKeySummary ? (
-                            <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--color-text-muted)' }}>
+                            <div style={{
+                              fontSize: 11,
+                              lineHeight: 1.45,
+                              color: 'var(--color-text-muted)',
+                              whiteSpace: 'normal',
+                              overflowWrap: 'anywhere',
+                              alignSelf: 'stretch',
+                              width: '100%',
+                            }}>
                               {downstreamKeySummary}
-                            </div>
-                          ) : null}
-                          {resolvedClientKind ? (
-                            <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--color-text-muted)' }}>
-                              应用: {formatClientKindLabel(resolvedClientKind)}{resolvedSessionId ? ` (${resolvedSessionId})` : ''}
                             </div>
                           ) : null}
                         </div>
                       </td>
-                      <td style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                        {log.siteName || '-'}
+                      <td>
+                        <span className="badge badge-muted" style={{ fontSize: 11 }}>
+                          {log.siteName || '-'}
+                        </span>
                       </td>
                       <td>
                         <span className={`badge ${log.status === 'success' ? 'badge-success' : 'badge-error'}`} style={{ fontSize: 11, fontWeight: 600 }}>
@@ -825,7 +942,7 @@ export default function ProxyLogs() {
                     </tr>
                     {expanded === log.id && (
                       <tr style={{ background: 'var(--color-bg)' }}>
-                        <td colSpan={10} style={{ padding: 0 }}>
+                        <td colSpan={11} style={{ padding: 0 }}>
                           <div className="anim-collapse is-open">
                             <div className="anim-collapse-inner">
                               <div className="animate-fade-in" style={{
@@ -852,11 +969,6 @@ export default function ProxyLogs() {
                                           ，账号: <strong style={{ color: 'var(--color-text-primary)' }}>{detailLog.username || '未知账号'}</strong>
                                         </>
                                       )}
-                                      {resolvedClientKind && (
-                                        <>
-                                          ，应用: <strong style={{ color: 'var(--color-text-primary)' }}>{formatClientKindLabel(resolvedClientKind)}</strong>
-                                        </>
-                                      )}
                                       {resolvedSessionId && (
                                         <>
                                           ，会话: <strong style={{ color: 'var(--color-text-primary)' }}>{resolvedSessionId}</strong>
@@ -868,8 +980,8 @@ export default function ProxyLogs() {
                                     {billingDetailSummary && (
                                       <div style={{ color: 'var(--color-text-muted)' }}>{billingDetailSummary}</div>
                                     )}
-                                    {downstreamKeySummary && (
-                                      <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeySummary}</div>
+                                    {downstreamKeyDetailSummary && (
+                                      <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeyDetailSummary}</div>
                                     )}
                                   </div>
                                 </div>
