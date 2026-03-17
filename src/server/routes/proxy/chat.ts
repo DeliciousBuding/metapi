@@ -72,7 +72,7 @@ async function handleChatProxyRequest(
     claudeOriginalBody,
   } = requestEnvelope.parsed;
   if (!await ensureModelAllowedForDownstreamKey(request, reply, requestedModel)) return;
-  const downstreamPolicy = getDownstreamRoutingPolicy(request);
+  const downstreamPolicy = getDownstreamRoutingPolicy(request, { clientKind: clientContext.clientKind });
   const owner = getProxyResourceOwner(request);
   let resolvedOpenAiBody = upstreamBody;
   if (owner) {

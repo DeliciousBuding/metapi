@@ -203,6 +203,9 @@ export type ProxyLogListItem = {
   username?: string | null;
   siteName?: string | null;
   siteUrl?: string | null;
+  clientKind?: string | null;
+  clientSessionId?: string | null;
+  clientTraceHint?: string | null;
   errorMessage?: string | null;
   downstreamKeyId?: number | null;
   downstreamKeyName?: string | null;
@@ -234,6 +237,7 @@ export type ProxyLogsQuery = {
   status?: ProxyLogStatusFilter;
   search?: string;
   siteId?: number;
+  clientKind?: string;
   from?: string;
   to?: string;
 };

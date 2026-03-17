@@ -34,6 +34,16 @@ type ProxyLogDetailState = {
 
 const PAGE_SIZES = [20, 50, 100];
 const DEFAULT_PAGE_SIZE = 50;
+type ProxyLogClientKindFilter = 'all' | 'codex' | 'claude_code' | 'gemini_cli' | 'cursor' | 'opencode' | 'openclaw';
+const CLIENT_KIND_FILTER_OPTIONS: Array<{ value: ProxyLogClientKindFilter; label: string }> = [
+  { value: 'all', label: '全部应用' },
+  { value: 'codex', label: 'Codex' },
+  { value: 'claude_code', label: 'Claude Code' },
+  { value: 'gemini_cli', label: 'Gemini CLI' },
+  { value: 'cursor', label: 'Cursor' },
+  { value: 'opencode', label: 'Opencode' },
+  { value: 'openclaw', label: 'OpenClaw' },
+];
 const EMPTY_SUMMARY: ProxyLogsSummary = {
   totalCount: 0,
   successCount: 0,
@@ -158,6 +168,29 @@ function normalizeRouteSiteId(raw: string | null): number | null {
   return parsed;
 }
 
+function normalizeRouteClientKind(raw: string | null): ProxyLogClientKindFilter {
+  const normalized = (raw || '').trim().toLowerCase();
+  if (!normalized || normalized === 'all') return 'all';
+  if (normalized === 'codex') return 'codex';
+  if (normalized === 'claude_code') return 'claude_code';
+  if (normalized === 'gemini_cli') return 'gemini_cli';
+  if (normalized === 'cursor') return 'cursor';
+  if (normalized === 'opencode') return 'opencode';
+  if (normalized === 'openclaw') return 'openclaw';
+  return 'all';
+}
+
+function formatClientKindLabel(clientKind: string | null | undefined): string {
+  const normalized = String(clientKind || '').trim().toLowerCase();
+  if (normalized === 'codex') return 'Codex';
+  if (normalized === 'claude_code') return 'Claude Code';
+  if (normalized === 'gemini_cli') return 'Gemini CLI';
+  if (normalized === 'cursor') return 'Cursor';
+  if (normalized === 'opencode') return 'Opencode';
+  if (normalized === 'openclaw') return 'OpenClaw';
+  return normalized || '-';
+}
+
 function normalizeRouteDateTimeInput(raw: string | null): string {
   const text = (raw || '').trim();
   if (!text) return '';
@@ -174,6 +207,7 @@ function readProxyLogsRouteState(search: string) {
     status: normalizeRouteStatus(params.get('status')),
     search: normalizeRouteSearch(params.get('q')),
     siteId: normalizeRouteSiteId(params.get('siteId')),
+    clientKind: normalizeRouteClientKind(params.get('clientKind')),
     from: normalizeRouteDateTimeInput(params.get('from')),
     to: normalizeRouteDateTimeInput(params.get('to')),
   };
@@ -185,6 +219,7 @@ function buildProxyLogsRouteSearch(input: {
   status: ProxyLogStatusFilter;
   search: string;
   siteId: number | null;
+  clientKind: ProxyLogClientKindFilter;
   from: string;
   to: string;
 }) {
@@ -194,6 +229,7 @@ function buildProxyLogsRouteSearch(input: {
   if (input.status !== 'all') params.set('status', input.status);
   if (input.search.trim()) params.set('q', input.search.trim());
   if (input.siteId) params.set('siteId', String(input.siteId));
+  if (input.clientKind !== 'all') params.set('clientKind', input.clientKind);
   if (input.from.trim()) params.set('from', input.from.trim());
   if (input.to.trim()) params.set('to', input.to.trim());
   const next = params.toString();
@@ -220,6 +256,7 @@ export default function ProxyLogs() {
   const [searchInput, setSearchInput] = useState(initialRouteState.search);
   const deferredSearchInput = useDeferredValue(searchInput.trim());
   const [siteFilter, setSiteFilter] = useState<number | null>(initialRouteState.siteId);
+  const [clientKindFilter, setClientKindFilter] = useState<ProxyLogClientKindFilter>(initialRouteState.clientKind);
   const [fromInput, setFromInput] = useState(initialRouteState.from);
   const [toInput, setToInput] = useState(initialRouteState.to);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -245,6 +282,7 @@ export default function ProxyLogs() {
     setStatusFilter((current) => (current === next.status ? current : next.status));
     setSearchInput((current) => (current === next.search ? current : next.search));
     setSiteFilter((current) => (current === next.siteId ? current : next.siteId));
+    setClientKindFilter((current) => (current === next.clientKind ? current : next.clientKind));
     setFromInput((current) => (current === next.from ? current : next.from));
     setToInput((current) => (current === next.to ? current : next.to));
     setPage((current) => (current === next.page ? current : next.page));
@@ -258,12 +296,13 @@ export default function ProxyLogs() {
       status: statusFilter,
       search: searchInput,
       siteId: siteFilter,
+      clientKind: clientKindFilter,
       from: fromInput,
       to: toInput,
     });
     if (nextSearch === location.search) return;
     navigate({ pathname: location.pathname, search: nextSearch }, { replace: true });
-  }, [fromInput, location.pathname, location.search, navigate, page, pageSize, searchInput, siteFilter, statusFilter, toInput]);
+  }, [clientKindFilter, fromInput, location.pathname, location.search, navigate, page, pageSize, searchInput, siteFilter, statusFilter, toInput]);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,6 +368,9 @@ export default function ProxyLogs() {
     if (!siteFilter) return '全部站点';
     return siteOptions.find((option) => option.value === String(siteFilter))?.label || `站点 #${siteFilter}`;
   }, [siteFilter, siteOptions]);
+  const activeClientKindLabel = useMemo(() => (
+    CLIENT_KIND_FILTER_OPTIONS.find((option) => option.value === clientKindFilter)?.label || '全部应用'
+  ), [clientKindFilter]);
 
   const load = useCallback(async (silent = false) => {
     const seq = ++loadSeq.current;
@@ -347,6 +389,7 @@ export default function ProxyLogs() {
         status: statusFilter,
         search: deferredSearchInput,
         ...(siteFilter ? { siteId: siteFilter } : {}),
+        ...(clientKindFilter !== 'all' ? { clientKind: clientKindFilter } : {}),
         ...(fromApiBoundary ? { from: fromApiBoundary } : {}),
         ...(toApiBoundaryValue ? { to: toApiBoundaryValue } : {}),
       };
@@ -361,7 +404,7 @@ export default function ProxyLogs() {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [currentOffset, deferredSearchInput, fromApiBoundary, hasInvalidTimeRange, pageSize, siteFilter, statusFilter, toApiBoundaryValue, toast]);
+  }, [clientKindFilter, currentOffset, deferredSearchInput, fromApiBoundary, hasInvalidTimeRange, pageSize, siteFilter, statusFilter, toApiBoundaryValue, toast]);
 
   useEffect(() => {
     void load();
@@ -451,6 +494,21 @@ export default function ProxyLogs() {
           placeholder="全部站点"
         />
       </div>
+      <div className="proxy-logs-filter-select">
+        <ModernSelect
+          size="sm"
+          value={clientKindFilter}
+          onChange={(nextValue) => {
+            setClientKindFilter(normalizeRouteClientKind(nextValue || null));
+            setPage(1);
+          }}
+          options={CLIENT_KIND_FILTER_OPTIONS.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          placeholder="全部应用"
+        />
+      </div>
       <label className="proxy-logs-time-field">
         <span>开始</span>
         <input
@@ -494,6 +552,7 @@ export default function ProxyLogs() {
         onClick={() => {
           setStatusFilter('all');
           setSiteFilter(null);
+          setClientKindFilter('all');
           setFromInput('');
           setToInput('');
           setSearchInput('');
@@ -512,6 +571,9 @@ export default function ProxyLogs() {
           <h2 className="page-title">{tr('使用日志')}</h2>
           <span className="kpi-chip">
             {activeSiteLabel}
+          </span>
+          <span className="kpi-chip">
+            {activeClientKindLabel}
           </span>
           <span className="kpi-chip kpi-chip-success">
             消耗总额 ${summary.totalCost.toFixed(4)}
@@ -592,6 +654,8 @@ export default function ProxyLogs() {
               const detail = detailState?.data;
               const detailLog: ProxyLogRenderItem = detail ? { ...log, ...detail } : log;
               const pathMeta = parseProxyLogPathMeta(detailLog.errorMessage);
+              const resolvedClientKind = (detailLog.clientKind || pathMeta.clientKind || '').trim();
+              const resolvedSessionId = (detailLog.clientSessionId || detailLog.clientTraceHint || pathMeta.sessionId || '').trim();
               const billingDetailSummary = detail ? formatBillingDetailSummary(detailLog) : null;
               const billingProcessLines = detail ? buildBillingProcessLines(detailLog) : [];
               const downstreamKeySummary = renderDownstreamKeySummary(detailLog);
@@ -609,6 +673,8 @@ export default function ProxyLogs() {
                 >
                   <MobileField label="时间" value={formatDateTimeLocal(log.createdAt)} />
                   <MobileField label="站点" value={log.siteName || '-'} />
+                  <MobileField label="应用" value={resolvedClientKind ? formatClientKindLabel(resolvedClientKind) : '-'} />
+                  {resolvedSessionId ? <MobileField label="会话" value={resolvedSessionId} /> : null}
                   {downstreamKeySummary ? <MobileField label="下游 Key" value={downstreamKeySummary} /> : null}
                   <MobileField label="用时" value={formatLatency(log.latencyMs)} />
                   <MobileField label="输入" value={log.promptTokens?.toLocaleString() || '-'} />
@@ -671,6 +737,8 @@ export default function ProxyLogs() {
                 const detail = detailState?.data;
                 const detailLog: ProxyLogRenderItem = detail ? { ...log, ...detail } : log;
                 const pathMeta = parseProxyLogPathMeta(detailLog.errorMessage);
+                const resolvedClientKind = (detailLog.clientKind || pathMeta.clientKind || '').trim();
+                const resolvedSessionId = (detailLog.clientSessionId || detailLog.clientTraceHint || pathMeta.sessionId || '').trim();
                 const billingDetailSummary = detail ? formatBillingDetailSummary(detailLog) : null;
                 const billingProcessLines = detail ? buildBillingProcessLines(detailLog) : [];
                 const downstreamKeySummary = renderDownstreamKeySummary(detailLog);
@@ -704,6 +772,11 @@ export default function ProxyLogs() {
                           {downstreamKeySummary ? (
                             <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--color-text-muted)' }}>
                               {downstreamKeySummary}
+                            </div>
+                          ) : null}
+                          {resolvedClientKind ? (
+                            <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--color-text-muted)' }}>
+                              应用: {formatClientKindLabel(resolvedClientKind)}{resolvedSessionId ? ` (${resolvedSessionId})` : ''}
                             </div>
                           ) : null}
                         </div>
@@ -777,6 +850,16 @@ export default function ProxyLogs() {
                                         <>
                                           ，站点: <strong style={{ color: 'var(--color-text-primary)' }}>{detailLog.siteName || '未知站点'}</strong>
                                           ，账号: <strong style={{ color: 'var(--color-text-primary)' }}>{detailLog.username || '未知账号'}</strong>
+                                        </>
+                                      )}
+                                      {resolvedClientKind && (
+                                        <>
+                                          ，应用: <strong style={{ color: 'var(--color-text-primary)' }}>{formatClientKindLabel(resolvedClientKind)}</strong>
+                                        </>
+                                      )}
+                                      {resolvedSessionId && (
+                                        <>
+                                          ，会话: <strong style={{ color: 'var(--color-text-primary)' }}>{resolvedSessionId}</strong>
                                         </>
                                       )}
                                     </div>

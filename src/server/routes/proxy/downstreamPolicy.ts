@@ -3,8 +3,23 @@ import { getProxyAuthContext } from '../../middleware/auth.js';
 import { isModelAllowedByPolicyOrAllowedRoutes, recordManagedKeyCostUsage } from '../../services/downstreamApiKeyService.js';
 import { EMPTY_DOWNSTREAM_ROUTING_POLICY, type DownstreamRoutingPolicy } from '../../services/downstreamPolicyTypes.js';
 
-export function getDownstreamRoutingPolicy(request: FastifyRequest): DownstreamRoutingPolicy {
-  return getProxyAuthContext(request)?.policy || EMPTY_DOWNSTREAM_ROUTING_POLICY;
+function normalizeClientKindHint(clientKind?: string | null): string | null {
+  const normalized = String(clientKind || '').trim().toLowerCase();
+  if (!normalized || normalized === 'generic') return null;
+  return normalized;
+}
+
+export function getDownstreamRoutingPolicy(
+  request: FastifyRequest,
+  options?: { clientKind?: string | null },
+): DownstreamRoutingPolicy {
+  const basePolicy = getProxyAuthContext(request)?.policy || EMPTY_DOWNSTREAM_ROUTING_POLICY;
+  const clientKind = normalizeClientKindHint(options?.clientKind);
+  if (!clientKind) return basePolicy;
+  return {
+    ...basePolicy,
+    clientKind,
+  };
 }
 
 export async function ensureModelAllowedForDownstreamKey(

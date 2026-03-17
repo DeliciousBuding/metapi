@@ -324,4 +324,87 @@ describe('TokenRouter downstream policy', () => {
     expect(claudePick?.channel.routeId).toBe(claudeGroupRoute.id);
     expect(gptPick?.channel.routeId).toBe(gptExactRoute.id);
   });
+
+  it('biases weighted routing by detected downstream client kind', async () => {
+    const codexSite = await db.insert(schema.sites).values({
+      name: 'codex-site',
+      url: 'https://codex.example.com',
+      platform: 'codex',
+      status: 'active',
+    }).returning().get();
+    const genericSite = await db.insert(schema.sites).values({
+      name: 'generic-site',
+      url: 'https://generic.example.com',
+      platform: 'new-api',
+      status: 'active',
+    }).returning().get();
+
+    const codexAccount = await db.insert(schema.accounts).values({
+      siteId: codexSite.id,
+      username: 'codex-user',
+      accessToken: 'codex-access',
+      apiToken: 'sk-codex',
+      status: 'active',
+      unitCost: 1,
+      balance: 100,
+    }).returning().get();
+    const genericAccount = await db.insert(schema.accounts).values({
+      siteId: genericSite.id,
+      username: 'generic-user',
+      accessToken: 'generic-access',
+      apiToken: 'sk-generic',
+      status: 'active',
+      unitCost: 1,
+      balance: 100,
+    }).returning().get();
+
+    const route = await db.insert(schema.tokenRoutes).values({
+      modelPattern: 'gpt-5-codex',
+      enabled: true,
+    }).returning().get();
+
+    const codexChannel = await db.insert(schema.routeChannels).values({
+      routeId: route.id,
+      accountId: codexAccount.id,
+      tokenId: null,
+      priority: 0,
+      weight: 10,
+      enabled: true,
+    }).returning().get();
+    const genericChannel = await db.insert(schema.routeChannels).values({
+      routeId: route.id,
+      accountId: genericAccount.id,
+      tokenId: null,
+      priority: 0,
+      weight: 10,
+      enabled: true,
+    }).returning().get();
+
+    const router = new TokenRouter();
+    const baseline = await router.explainSelectionForRoute(route.id, 'gpt-5-codex', [], {
+      allowedRouteIds: [route.id],
+      supportedModels: [],
+      siteWeightMultipliers: {},
+    });
+    const codexBiased = await router.explainSelectionForRoute(route.id, 'gpt-5-codex', [], {
+      allowedRouteIds: [route.id],
+      supportedModels: [],
+      siteWeightMultipliers: {},
+      clientKind: 'codex',
+    });
+
+    const baselineCodex = baseline.candidates.find((candidate) => candidate.channelId === codexChannel.id);
+    const baselineGeneric = baseline.candidates.find((candidate) => candidate.channelId === genericChannel.id);
+    const biasedCodex = codexBiased.candidates.find((candidate) => candidate.channelId === codexChannel.id);
+    const biasedGeneric = codexBiased.candidates.find((candidate) => candidate.channelId === genericChannel.id);
+
+    expect(baselineCodex).toBeTruthy();
+    expect(baselineGeneric).toBeTruthy();
+    expect(Math.abs((baselineCodex?.probability || 0) - (baselineGeneric?.probability || 0))).toBeLessThanOrEqual(1);
+
+    expect(biasedCodex).toBeTruthy();
+    expect(biasedGeneric).toBeTruthy();
+    expect((biasedCodex?.probability || 0)).toBeGreaterThan(biasedGeneric?.probability || 0);
+    expect(codexBiased.summary.join(' ')).toContain('应用分流：codex');
+  });
 });

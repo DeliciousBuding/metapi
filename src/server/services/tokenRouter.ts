@@ -159,6 +159,25 @@ function isSiteDisabled(status?: string | null): boolean {
   return (status || 'active') === 'disabled';
 }
 
+function resolveClientKindSiteMultiplier(clientKind: string | null | undefined, sitePlatform: string | null | undefined): number {
+  const normalizedClientKind = String(clientKind || '').trim().toLowerCase();
+  if (!normalizedClientKind) return 1;
+
+  const normalizedPlatform = String(sitePlatform || '').trim().toLowerCase();
+  if (!normalizedPlatform) return 1;
+
+  if (normalizedClientKind === 'codex' && normalizedPlatform.includes('codex')) {
+    return 2.2;
+  }
+  if (normalizedClientKind === 'claude_code' && (normalizedPlatform.includes('anthropic') || normalizedPlatform.includes('claude'))) {
+    return 2.0;
+  }
+  if (normalizedClientKind === 'gemini_cli' && normalizedPlatform.includes('gemini')) {
+    return 2.0;
+  }
+  return 1;
+}
+
 export function isChannelRecentlyFailed(
   channel: FailureAwareChannel,
   nowMs = Date.now(),
@@ -555,6 +574,9 @@ export class TokenRouter {
       `命中路由：${match.route.modelPattern}`,
       routeStrategy === 'round_robin' ? '路由策略：轮询' : '路由策略：按权重随机',
     ];
+    if (downstreamPolicy.clientKind) {
+      summary.push(`应用分流：${downstreamPolicy.clientKind}`);
+    }
     if (requestedByDisplayName) {
       summary.push(`按显示名命中：${normalizeRouteDisplayName(match.route.displayName)}`);
       summary.push('显示名仅用于聚合展示，实际转发模型按选中通道来源模型决定');
@@ -1193,6 +1215,13 @@ export class TokenRouter {
       if (combinedSiteWeight > 0 && Number.isFinite(combinedSiteWeight)) {
         contribution *= combinedSiteWeight;
       }
+      const clientSiteMultiplier = resolveClientKindSiteMultiplier(
+        downstreamPolicy.clientKind,
+        candidate.site.platform,
+      );
+      if (clientSiteMultiplier > 0 && Number.isFinite(clientSiteMultiplier)) {
+        contribution *= clientSiteMultiplier;
+      }
 
       // If upstream price is unknown and we are using fallback unit cost,
       // apply an explicit penalty so raising fallback cost meaningfully lowers probability.
@@ -1222,10 +1251,14 @@ export class TokenRouter {
           ? (candidate.site.globalWeight as number)
           : 1;
       const combinedSiteWeight = siteGlobalWeight * normalizedDownstreamSiteMultiplier;
+      const clientSiteMultiplier = resolveClientKindSiteMultiplier(
+        downstreamPolicy.clientKind,
+        candidate.site.platform,
+      );
       return {
         candidate,
         probability,
-        reason: `按权重随机（W=${weight}，成本=${costSourceText}:${(cost?.unitCost || 1).toFixed(6)}，站点权重=${siteGlobalWeight.toFixed(2)}x下游倍率=${normalizedDownstreamSiteMultiplier.toFixed(2)}=${combinedSiteWeight.toFixed(2)}，同站点通道=${siteChannels}，概率≈${(probability * 100).toFixed(1)}%）`,
+        reason: `按权重随机（W=${weight}，成本=${costSourceText}:${(cost?.unitCost || 1).toFixed(6)}，站点权重=${siteGlobalWeight.toFixed(2)}x下游倍率=${normalizedDownstreamSiteMultiplier.toFixed(2)}=${combinedSiteWeight.toFixed(2)}x应用倍率=${clientSiteMultiplier.toFixed(2)}，同站点通道=${siteChannels}，概率≈${(probability * 100).toFixed(1)}%）`,
       };
     });
 

@@ -392,4 +392,64 @@ describe('stats proxy logs routes', () => {
       totalTokensAll: 30,
     });
   });
+
+  it('filters proxy logs by client kind marker in error message', async () => {
+    const site = await db.insert(schema.sites).values({
+      name: 'client-site',
+      url: 'https://client.example.com',
+      platform: 'new-api',
+    }).returning().get();
+    const account = await db.insert(schema.accounts).values({
+      siteId: site.id,
+      username: 'client-user',
+      accessToken: 'client-token',
+      status: 'active',
+    }).returning().get();
+
+    await db.insert(schema.proxyLogs).values([
+      {
+        accountId: account.id,
+        modelRequested: 'gpt-5-codex',
+        modelActual: 'gpt-5-codex',
+        status: 'success',
+        errorMessage: '[client:codex] [session:req-a] [downstream:/v1/responses] ok',
+        totalTokens: 10,
+        estimatedCost: 0.01,
+        createdAt: formatUtcSqlDateTime(new Date('2026-03-10T08:00:00.000Z')),
+      },
+      {
+        accountId: account.id,
+        modelRequested: 'claude-sonnet-4-6',
+        modelActual: 'claude-sonnet-4-6',
+        status: 'success',
+        errorMessage: '[client:claude_code] [session:req-b] [downstream:/v1/messages] ok',
+        totalTokens: 20,
+        estimatedCost: 0.02,
+        createdAt: formatUtcSqlDateTime(new Date('2026-03-10T08:01:00.000Z')),
+      },
+    ]).run();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/stats/proxy-logs?clientKind=codex',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as {
+      total: number;
+      items: Array<Record<string, unknown>>;
+      summary: {
+        totalCount: number;
+        successCount: number;
+        failedCount: number;
+      };
+    };
+
+    expect(body.total).toBe(1);
+    expect(body.items[0]?.modelRequested).toBe('gpt-5-codex');
+    expect(String(body.items[0]?.errorMessage || '')).toContain('[client:codex]');
+    expect(body.summary.totalCount).toBe(1);
+    expect(body.summary.successCount).toBe(1);
+    expect(body.summary.failedCount).toBe(0);
+  });
 });

@@ -146,7 +146,7 @@ export async function responsesProxyRoute(app: FastifyInstance) {
       });
     }
     if (!await ensureModelAllowedForDownstreamKey(request, reply, requestedModel)) return;
-    const downstreamPolicy = getDownstreamRoutingPolicy(request);
+    const downstreamPolicy = getDownstreamRoutingPolicy(request, { clientKind: clientContext.clientKind });
     const downstreamApiKeyId = getProxyAuthContext(request)?.keyId ?? null;
     const logDownstreamApiKeyId = downstreamApiKeyId !== null
       && await hasProxyLogDownstreamApiKeyIdColumn();

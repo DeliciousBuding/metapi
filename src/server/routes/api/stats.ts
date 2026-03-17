@@ -113,6 +113,12 @@ function normalizeProxyLogSiteId(raw?: string): number | null {
   return parsed;
 }
 
+function normalizeProxyLogClientKind(raw?: string): string | null {
+  const normalized = (raw || '').trim().toLowerCase();
+  if (!normalized || normalized === 'all') return null;
+  return normalized;
+}
+
 function normalizeProxyLogTimeBoundary(raw?: string): string | null {
   const text = (raw || '').trim();
   if (!text) return null;
@@ -148,6 +154,7 @@ function buildProxyLogSearchCondition(search: string) {
   return sql<boolean>`(
     lower(coalesce(${schema.proxyLogs.modelRequested}, '')) like ${likeTerm}
     or lower(coalesce(${schema.proxyLogs.modelActual}, '')) like ${likeTerm}
+    or lower(coalesce(${schema.proxyLogs.errorMessage}, '')) like ${likeTerm}
     or lower(coalesce(${schema.downstreamApiKeys.name}, '')) like ${likeTerm}
     or lower(coalesce(${schema.downstreamApiKeys.groupName}, '')) like ${likeTerm}
     or lower(coalesce(${schema.downstreamApiKeys.tags}, '')) like ${likeTerm}
@@ -168,13 +175,16 @@ function buildProxyLogWhereClause(params: {
   status?: ProxyLogStatusFilter;
   search?: string;
   siteId?: number | null;
+  clientKind?: string | null;
   fromUtc?: string | null;
   toUtc?: string | null;
 }) {
+  const clientKindLike = params.clientKind ? `%[client:${params.clientKind}]%` : null;
   const conditions = [
     params.status ? buildProxyLogStatusCondition(params.status) : null,
     params.search ? buildProxyLogSearchCondition(params.search) : null,
     params.siteId ? eq(schema.sites.id, params.siteId) : null,
+    clientKindLike ? sql<boolean>`lower(coalesce(${schema.proxyLogs.errorMessage}, '')) like ${clientKindLike}` : null,
     params.fromUtc ? gte(schema.proxyLogs.createdAt, params.fromUtc) : null,
     params.toUtc ? lt(schema.proxyLogs.createdAt, params.toUtc) : null,
   ].filter((condition): condition is NonNullable<typeof condition> => condition !== null);
@@ -546,6 +556,7 @@ export async function statsRoutes(app: FastifyInstance) {
     status?: string;
     search?: string;
     siteId?: string;
+    clientKind?: string;
     from?: string;
     to?: string;
   } }>('/api/stats/proxy-logs', async (request) => {
@@ -554,10 +565,11 @@ export async function statsRoutes(app: FastifyInstance) {
     const status = normalizeProxyLogStatusFilter(request.query.status);
     const search = normalizeProxyLogSearch(request.query.search);
     const siteId = normalizeProxyLogSiteId(request.query.siteId);
+    const clientKind = normalizeProxyLogClientKind(request.query.clientKind);
     const fromUtc = normalizeProxyLogTimeBoundary(request.query.from);
     const toUtc = normalizeProxyLogTimeBoundary(request.query.to);
-    const listWhere = buildProxyLogWhereClause({ status, search, siteId, fromUtc, toUtc });
-    const summaryWhere = buildProxyLogWhereClause({ search, siteId, fromUtc, toUtc });
+    const listWhere = buildProxyLogWhereClause({ status, search, siteId, clientKind, fromUtc, toUtc });
+    const summaryWhere = buildProxyLogWhereClause({ search, siteId, clientKind, fromUtc, toUtc });
 
     const listRows = await withProxyLogSelectFields(({ fields }) => {
       let query = db.select({

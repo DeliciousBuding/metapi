@@ -37,6 +37,105 @@ describe('isCodexResponsesSurface', () => {
 });
 
 describe('detectDownstreamClientContext', () => {
+  it('recognizes Codex from originator header without relying on path', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        originator: 'codex_exec',
+        'User-Agent': 'codex_exec/0.114.0 (Windows)',
+        session_id: 'codex-session-xyz',
+      },
+    })).toEqual({
+      clientKind: 'codex',
+      sessionId: 'codex-session-xyz',
+      traceHint: 'codex-session-xyz',
+    });
+  });
+
+  it('recognizes Claude Code from anthropic-beta header without relying on path', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'anthropic-beta': 'claude-code-20250219,adaptive-thinking-2026-01-28',
+        'User-Agent': 'claude-cli/2.1.69 (external, sdk-cli)',
+      },
+    })).toEqual({
+      clientKind: 'claude_code',
+    });
+  });
+
+  it('recognizes Gemini CLI from user-agent and privileged id headers', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'User-Agent': 'GeminiCLI/0.33.1/gemini-2.5-pro (linux; x64)',
+      },
+    })).toEqual({
+      clientKind: 'gemini_cli',
+    });
+
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'x-gemini-api-privileged-user-id': 'b96bb53b-5606-4e6a-a182-f047f68f8f94',
+      },
+    })).toEqual({
+      clientKind: 'gemini_cli',
+    });
+  });
+
+  it('recognizes Cursor from client version or user-agent', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'x-cursor-client-version': '0.50.1',
+      },
+    })).toEqual({
+      clientKind: 'cursor',
+    });
+
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'user-agent': 'Cursor/0.50.1 (Electron)',
+      },
+    })).toEqual({
+      clientKind: 'cursor',
+    });
+  });
+
+  it('recognizes Opencode from x-opencode headers', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'x-opencode-directory': '%2Fhome%2Fding%2Fproject',
+      },
+    })).toEqual({
+      clientKind: 'opencode',
+    });
+  });
+
+  it('recognizes OpenClaw from openrouter app headers and user-agent', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'HTTP-Referer': 'https://openclaw.ai',
+        'X-Title': 'OpenClaw',
+      },
+    })).toEqual({
+      clientKind: 'openclaw',
+    });
+
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'user-agent': 'OpenClaw/2026.3.13 (linux)',
+      },
+    })).toEqual({
+      clientKind: 'openclaw',
+    });
+  });
+
   it('recognizes Codex requests and attaches Session_id as session and trace hint', () => {
     expect(detectDownstreamClientContext({
       downstreamPath: '/v1/responses',

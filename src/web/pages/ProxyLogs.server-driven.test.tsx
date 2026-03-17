@@ -65,6 +65,8 @@ function buildListResponse(overrides?: Partial<{
         downstreamKeyName: '移动端灰度',
         downstreamKeyGroupName: '项目A',
         downstreamKeyTags: ['VIP', '灰度'],
+        clientKind: 'codex',
+        clientSessionId: 'req-101',
       },
     ],
     total: 1,
@@ -105,6 +107,8 @@ describe('ProxyLogs server-driven page', () => {
       username: 'tester',
       siteName: 'main-site',
       siteUrl: 'https://main-site.example.com',
+      clientKind: 'codex',
+      clientSessionId: 'req-101',
       downstreamKeyName: '移动端灰度',
       downstreamKeyGroupName: '项目A',
       downstreamKeyTags: ['VIP', '灰度'],
@@ -172,6 +176,7 @@ describe('ProxyLogs server-driven page', () => {
       expect(text).toContain('成功 8');
       expect(text).toContain('失败 4');
       expect(text).toContain('下游 Key: 移动端灰度');
+      expect(text).toContain('Codex');
     } finally {
       root?.unmount();
     }
@@ -297,6 +302,33 @@ describe('ProxyLogs server-driven page', () => {
 
       const rendered = JSON.stringify(root!.toJSON());
       expect(rendered).toContain('main-site');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('hydrates client kind filter from route query and sends it to api', async () => {
+    let root: ReturnType<typeof create> | null = null;
+
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/logs?clientKind=codex']}>
+            <ToastProvider>
+              <ProxyLogs />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.getProxyLogs).toHaveBeenCalledWith({
+        limit: 50,
+        offset: 0,
+        status: 'all',
+        search: '',
+        clientKind: 'codex',
+      });
     } finally {
       root?.unmount();
     }
