@@ -867,11 +867,6 @@ export default function ProxyLogs() {
                               {downstreamKeySummary}
                             </div>
                           ) : null}
-                          {resolvedClientKind ? (
-                            <div style={{ fontSize: 11, lineHeight: 1.45 }}>
-                              {renderClientKindBadge(resolvedClientKind, resolvedSessionId || null)}
-                            </div>
-                          ) : null}
                         </div>
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
