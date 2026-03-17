@@ -3,16 +3,9 @@ import { appendFileSync } from 'fs';
 export type DownstreamClientKind =
   | 'generic'
   | 'codex'
-  | 'cline'
   | 'claude_code'
   | 'gemini_cli'
   | 'cursor'
-  | 'kilocode'
-  | 'copilot_cli'
-  | 'cherrystudio'
-  | 'chatbox'
-  | 'aider'
-  | 'openwebui'
   | 'opencode'
   | 'openclaw';
 
@@ -79,36 +72,6 @@ function pickDebugHeaders(headers?: Record<string, unknown>): Record<string, str
     'x-opencode-directory',
     'x-opencode-workspace',
     'x-cursor-client-version',
-    'x-client-type',
-    'x-client-version',
-    'x-core-version',
-    'x-platform',
-    'x-platform-version',
-    'x-is-multiroot',
-    'copilot-integration-id',
-    'editor-version',
-    'editor-plugin-version',
-    'copilot-vision-request',
-    'chatbox-session-id',
-    'x-openwebui-user-name',
-    'x-openwebui-user-id',
-    'x-openwebui-user-email',
-    'x-openwebui-user-role',
-    'x-openwebui-message-id',
-    'x-openwebui-chat-id',
-    'openwebui-user-name',
-    'openwebui-user-id',
-    'openwebui-user-email',
-    'openwebui-user-role',
-    'openwebui-message-id',
-    'openwebui-chat-id',
-    'x-kilocode-editorname',
-    'x-kilocode-organizationid',
-    'x-kilocode-taskid',
-    'x-kilocode-projectid',
-    'x-kilocode-tester',
-    'x-kilocode-machineid',
-    'x-kilocode-feature',
     'http-referer',
     'x-title',
   ]);
@@ -206,13 +169,6 @@ const claudeCodeBetaPattern = /(?:^|,)\s*claude-code-\d{8}(?:\s*,|$)/i;
 const codexOriginators = new Set(['codex_cli_rs', 'codex_exec', 'codex_cli']);
 const codexUserAgentTokens = ['codex_exec', 'codex-cli', 'codex_cli'];
 const geminiCliUserAgentPattern = /^geminicli\//i;
-const clineUserAgentPattern = /(?:^|[\s(])cline\//i;
-const kilocodeUserAgentPattern = /opencode-kilo-provider/i;
-const copilotUserAgentPattern = /githubcopilotchat\//i;
-const cherryStudioUserAgentPattern = /cherry(?:ai|[-_ ]studio)/i;
-const chatboxTitlePattern = /chatbox\s*ai/i;
-const aiderTitlePattern = /aider/i;
-const openWebUiTitlePattern = /open\s*webui/i;
 const cursorUserAgentPattern = /(?:^|[\s(])cursor(?:\/|[-_ ]agent)/i;
 const opencodeUserAgentPattern = /(?:^|[\s(])opencode(?:\/|[-_ ])/i;
 const openclawUserAgentPattern = /(?:^|[\s(])openclaw(?:\/|[-_ ])/i;
@@ -256,56 +212,11 @@ function hasCodexHeaderSignal(headers?: Record<string, unknown>): boolean {
   return false;
 }
 
-function hasClineHeaderSignal(headers?: Record<string, unknown>): boolean {
-  if (!headers) return false;
-  const originator = getHeaderValue(headers, 'originator');
-  if (originator && originator.toLowerCase() === 'cline') return true;
-  const ua = getHeaderValue(headers, 'user-agent');
-  if (ua && clineUserAgentPattern.test(ua)) return true;
-  const clientType = getHeaderValue(headers, 'x-client-type');
-  if (clientType && clientType.toLowerCase().includes('cline')) return true;
-  return false;
-}
-
 function hasGeminiCliHeaderSignal(headers?: Record<string, unknown>): boolean {
   if (!headers) return false;
   const ua = getHeaderValue(headers, 'user-agent');
   if (ua && geminiCliUserAgentPattern.test(ua)) return true;
   if (getHeaderValue(headers, 'x-gemini-api-privileged-user-id')) return true;
-  return false;
-}
-
-function hasKilocodeHeaderSignal(headers?: Record<string, unknown>): boolean {
-  if (!headers) return false;
-  const ua = getHeaderValue(headers, 'user-agent');
-  if (ua && kilocodeUserAgentPattern.test(ua)) return true;
-  const kilocodeHeaders = [
-    'x-kilocode-editorname',
-    'x-kilocode-organizationid',
-    'x-kilocode-taskid',
-    'x-kilocode-projectid',
-    'x-kilocode-machineid',
-    'x-kilocode-tester',
-    'x-kilocode-feature',
-  ];
-  return kilocodeHeaders.some((header) => !!getHeaderValue(headers, header));
-}
-
-function hasCopilotHeaderSignal(headers?: Record<string, unknown>): boolean {
-  if (!headers) return false;
-  if (getHeaderValue(headers, 'copilot-integration-id')) return true;
-  if (getHeaderValue(headers, 'copilot-vision-request')) return true;
-  const editorPlugin = getHeaderValue(headers, 'editor-plugin-version');
-  if (editorPlugin && editorPlugin.toLowerCase().includes('copilot')) return true;
-  const ua = getHeaderValue(headers, 'user-agent');
-  if (ua && copilotUserAgentPattern.test(ua)) return true;
-  return false;
-}
-
-function hasCherryStudioHeaderSignal(headers?: Record<string, unknown>): boolean {
-  if (!headers) return false;
-  const ua = getHeaderValue(headers, 'user-agent');
-  if (ua && cherryStudioUserAgentPattern.test(ua)) return true;
   return false;
 }
 
@@ -335,49 +246,6 @@ function hasOpenclawHeaderSignal(headers?: Record<string, unknown>): boolean {
   if (referer && referer.toLowerCase().includes('openclaw.ai') && title?.toLowerCase() === 'openclaw') {
     return true;
   }
-  return false;
-}
-
-function hasChatboxHeaderSignal(headers?: Record<string, unknown>): boolean {
-  if (!headers) return false;
-  if (getHeaderValue(headers, 'chatbox-session-id')) return true;
-  const referer = getHeaderValue(headers, 'http-referer');
-  if (referer && referer.toLowerCase().includes('chatboxai.app')) return true;
-  const title = getHeaderValue(headers, 'x-title');
-  if (title && chatboxTitlePattern.test(title)) return true;
-  return false;
-}
-
-function hasAiderHeaderSignal(headers?: Record<string, unknown>): boolean {
-  if (!headers) return false;
-  const referer = getHeaderValue(headers, 'http-referer');
-  if (referer && referer.toLowerCase().includes('aider.chat')) return true;
-  const title = getHeaderValue(headers, 'x-title');
-  if (title && aiderTitlePattern.test(title)) return true;
-  return false;
-}
-
-function hasOpenWebUiHeaderSignal(headers?: Record<string, unknown>): boolean {
-  if (!headers) return false;
-  const openWebUiHeaders = [
-    'x-openwebui-user-name',
-    'x-openwebui-user-id',
-    'x-openwebui-user-email',
-    'x-openwebui-user-role',
-    'x-openwebui-message-id',
-    'x-openwebui-chat-id',
-    'openwebui-user-name',
-    'openwebui-user-id',
-    'openwebui-user-email',
-    'openwebui-user-role',
-    'openwebui-message-id',
-    'openwebui-chat-id',
-  ];
-  if (openWebUiHeaders.some((header) => !!getHeaderValue(headers, header))) return true;
-  const referer = getHeaderValue(headers, 'http-referer');
-  if (referer && referer.toLowerCase().includes('openwebui.com')) return true;
-  const title = getHeaderValue(headers, 'x-title');
-  if (title && openWebUiTitlePattern.test(title)) return true;
   return false;
 }
 
@@ -417,52 +285,8 @@ export function detectDownstreamClientContext(input: {
     return { clientKind: 'codex' };
   }
 
-  if (hasClineHeaderSignal(input.headers)) {
-    const sessionId = extractCodexSessionId(input.headers);
-    if (sessionId) {
-      return {
-        clientKind: 'cline',
-        sessionId,
-        traceHint: sessionId,
-      };
-    }
-    return { clientKind: 'cline' };
-  }
-
   if (hasGeminiCliHeaderSignal(input.headers)) {
     return { clientKind: 'gemini_cli' };
-  }
-
-  if (hasKilocodeHeaderSignal(input.headers)) {
-    return { clientKind: 'kilocode' };
-  }
-
-  if (hasChatboxHeaderSignal(input.headers)) {
-    const sessionId = getHeaderValue(input.headers, 'chatbox-session-id');
-    if (sessionId) {
-      return {
-        clientKind: 'chatbox',
-        sessionId,
-        traceHint: sessionId,
-      };
-    }
-    return { clientKind: 'chatbox' };
-  }
-
-  if (hasAiderHeaderSignal(input.headers)) {
-    return { clientKind: 'aider' };
-  }
-
-  if (hasOpenWebUiHeaderSignal(input.headers)) {
-    return { clientKind: 'openwebui' };
-  }
-
-  if (hasCherryStudioHeaderSignal(input.headers)) {
-    return { clientKind: 'cherrystudio' };
-  }
-
-  if (hasCopilotHeaderSignal(input.headers)) {
-    return { clientKind: 'copilot_cli' };
   }
 
   if (hasCursorHeaderSignal(input.headers)) {

@@ -17,6 +17,7 @@ import { formatDateTimeLocal } from './helpers/checkinLogTime.js';
 import ModernSelect from '../components/ModernSelect.js';
 import { parseProxyLogPathMeta } from './helpers/proxyLogPathMeta.js';
 import { tr } from '../i18n.js';
+import codexLogo from '../assets/client-logos/codex.svg';
 
 type ProxyLogRenderItem = ProxyLogListItem & {
   billingDetails?: ProxyLogBillingDetails;
@@ -34,34 +35,13 @@ type ProxyLogDetailState = {
 
 const PAGE_SIZES = [20, 50, 100];
 const DEFAULT_PAGE_SIZE = 50;
-type ProxyLogClientKindFilter =
-  | 'all'
-  | 'codex'
-  | 'claude_code'
-  | 'gemini_cli'
-  | 'cursor'
-  | 'cline'
-  | 'kilocode'
-  | 'copilot_cli'
-  | 'cherrystudio'
-  | 'chatbox'
-  | 'aider'
-  | 'openwebui'
-  | 'opencode'
-  | 'openclaw';
+type ProxyLogClientKindFilter = 'all' | 'codex' | 'claude_code' | 'gemini_cli' | 'cursor' | 'opencode' | 'openclaw';
 const CLIENT_KIND_FILTER_OPTIONS: Array<{ value: ProxyLogClientKindFilter; label: string }> = [
   { value: 'all', label: '全部应用' },
   { value: 'codex', label: 'Codex' },
   { value: 'claude_code', label: 'Claude Code' },
   { value: 'gemini_cli', label: 'Gemini CLI' },
   { value: 'cursor', label: 'Cursor' },
-  { value: 'cline', label: 'Cline' },
-  { value: 'kilocode', label: 'KiloCode' },
-  { value: 'copilot_cli', label: 'Copilot CLI' },
-  { value: 'cherrystudio', label: 'Cherry Studio' },
-  { value: 'chatbox', label: 'Chatbox' },
-  { value: 'aider', label: 'Aider' },
-  { value: 'openwebui', label: 'Open WebUI' },
   { value: 'opencode', label: 'Opencode' },
   { value: 'openclaw', label: 'OpenClaw' },
 ];
@@ -196,13 +176,6 @@ function normalizeRouteClientKind(raw: string | null): ProxyLogClientKindFilter 
   if (normalized === 'claude_code') return 'claude_code';
   if (normalized === 'gemini_cli') return 'gemini_cli';
   if (normalized === 'cursor') return 'cursor';
-  if (normalized === 'cline') return 'cline';
-  if (normalized === 'kilocode') return 'kilocode';
-  if (normalized === 'copilot_cli') return 'copilot_cli';
-  if (normalized === 'cherrystudio') return 'cherrystudio';
-  if (normalized === 'chatbox') return 'chatbox';
-  if (normalized === 'aider') return 'aider';
-  if (normalized === 'openwebui') return 'openwebui';
   if (normalized === 'opencode') return 'opencode';
   if (normalized === 'openclaw') return 'openclaw';
   return 'all';
@@ -214,13 +187,6 @@ function formatClientKindLabel(clientKind: string | null | undefined): string {
   if (normalized === 'claude_code') return 'Claude Code';
   if (normalized === 'gemini_cli') return 'Gemini CLI';
   if (normalized === 'cursor') return 'Cursor';
-  if (normalized === 'cline') return 'Cline';
-  if (normalized === 'kilocode') return 'KiloCode';
-  if (normalized === 'copilot_cli') return 'Copilot CLI';
-  if (normalized === 'cherrystudio') return 'Cherry Studio';
-  if (normalized === 'chatbox') return 'Chatbox';
-  if (normalized === 'aider') return 'Aider';
-  if (normalized === 'openwebui') return 'Open WebUI';
   if (normalized === 'opencode') return 'Opencode';
   if (normalized === 'openclaw') return 'OpenClaw';
   return normalized || '-';
@@ -229,18 +195,11 @@ function formatClientKindLabel(clientKind: string | null | undefined): string {
 function resolveClientIconHint(clientKind: string | null | undefined): string | null {
   const normalized = String(clientKind || '').trim().toLowerCase();
   if (!normalized) return null;
-  if (normalized === 'codex') return 'codex';
-  if (normalized === 'claude_code') return 'claudecode';
+  if (normalized === 'codex') return 'openai';
+  if (normalized === 'claude_code') return 'claude-color';
   if (normalized === 'gemini_cli') return 'gemini-color';
   if (normalized === 'cursor') return 'cursor';
-  if (normalized === 'cline') return 'cline';
-  if (normalized === 'kilocode') return 'kilocode';
-  if (normalized === 'copilot_cli') return 'githubcopilot';
-  if (normalized === 'cherrystudio') return 'cherrystudio';
-  if (normalized === 'chatbox') return null;
-  if (normalized === 'aider') return null;
-  if (normalized === 'openwebui') return 'openwebui';
-  if (normalized === 'opencode') return 'opencode';
+  if (normalized === 'opencode') return 'open-code';
   if (normalized === 'openclaw') return 'openclaw';
   return normalized;
 }
@@ -250,6 +209,7 @@ function renderClientKindBadge(clientKind: string | null | undefined, sessionId?
   if (!normalized) return null;
   const label = formatClientKindLabel(normalized);
   const iconHint = resolveClientIconHint(normalized);
+  const isCodex = normalized === 'codex';
   return (
     <span style={{
       display: 'inline-flex',
@@ -265,7 +225,21 @@ function renderClientKindBadge(clientKind: string | null | undefined, sessionId?
       maxWidth: '100%',
     }}
     >
-      <BrandGlyph icon={iconHint} fallbackText={label} size={12} />
+      {isCodex ? (
+        <img
+          src={codexLogo}
+          alt="Codex"
+          style={{
+            width: 13,
+            height: 13,
+            objectFit: 'contain',
+            flexShrink: 0,
+          }}
+          loading="lazy"
+        />
+      ) : (
+        <BrandGlyph icon={iconHint} fallbackText={label} size={12} />
+      )}
       <span>{label}</span>
       {sessionId ? (
         <span style={{
