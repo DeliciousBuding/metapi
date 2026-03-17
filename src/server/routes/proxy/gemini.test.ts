@@ -13,12 +13,7 @@ const invalidateTokenRouterCacheMock = vi.fn();
 const authorizeDownstreamTokenMock = vi.fn();
 const consumeManagedKeyRequestMock = vi.fn();
 const isModelAllowedByPolicyOrAllowedRoutesMock = vi.fn();
-const dbInsertValuesMock = vi.fn((_values?: unknown) => ({
-  run: () => undefined,
-}));
-const dbInsertMock = vi.fn((_table?: unknown) => ({
-  values: (values: unknown) => dbInsertValuesMock(values),
-}));
+const insertProxyLogMock = vi.fn(async (_values?: unknown) => undefined);
 
 vi.mock('undici', () => ({
   fetch: (...args: unknown[]) => fetchMock(...args),
@@ -41,13 +36,8 @@ vi.mock('../../services/downstreamApiKeyService.js', () => ({
   isModelAllowedByPolicyOrAllowedRoutes: (...args: unknown[]) => isModelAllowedByPolicyOrAllowedRoutesMock(...args),
 }));
 
-vi.mock('../../db/index.js', () => ({
-  db: {
-    insert: (arg: unknown) => dbInsertMock(arg),
-  },
-  schema: {
-    proxyLogs: {},
-  },
+vi.mock('../../services/proxyLogStore.js', () => ({
+  insertProxyLog: (arg: unknown) => insertProxyLogMock(arg),
 }));
 
 function parseSsePayloads(body: string): Array<Record<string, unknown>> {
@@ -109,8 +99,7 @@ describe('gemini native proxy routes', () => {
     authorizeDownstreamTokenMock.mockReset();
     consumeManagedKeyRequestMock.mockReset();
     isModelAllowedByPolicyOrAllowedRoutesMock.mockReset();
-    dbInsertMock.mockClear();
-    dbInsertValuesMock.mockClear();
+    insertProxyLogMock.mockClear();
 
     authorizeDownstreamTokenMock.mockResolvedValue({
       ok: true,
@@ -354,8 +343,8 @@ describe('gemini native proxy routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(recordSuccessMock).toHaveBeenCalledWith(11, expect.any(Number), 0);
-    expect(dbInsertMock).toHaveBeenCalledTimes(1);
-    expect(dbInsertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+    expect(insertProxyLogMock).toHaveBeenCalledTimes(1);
+    expect(insertProxyLogMock).toHaveBeenCalledWith(expect.objectContaining({
       routeId: 22,
       channelId: 11,
       accountId: 33,
@@ -991,15 +980,15 @@ describe('gemini native proxy routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(dbInsertMock).toHaveBeenCalledTimes(2);
-    expect(dbInsertValuesMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(insertProxyLogMock).toHaveBeenCalledTimes(2);
+    expect(insertProxyLogMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
       channelId: 11,
       status: 'failed',
       httpStatus: 500,
       retryCount: 0,
       errorMessage: '[downstream:/v1beta/models/gemini-2.5-flash:streamGenerateContent] [upstream:/v1beta/models/gemini-2.5-flash:streamGenerateContent] {\"error\":{\"message\":\"upstream unavailable\"}}',
     }));
-    expect(dbInsertValuesMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(insertProxyLogMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
       channelId: 12,
       status: 'success',
       httpStatus: 200,

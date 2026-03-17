@@ -592,8 +592,8 @@ function ensureProxyLogTrafficLabelSchema() {
     execSqliteLegacyCompat('ALTER TABLE proxy_logs ADD COLUMN upstream_path text;');
   }
 
-  execSqliteLegacyCompat('CREATE INDEX IF NOT EXISTS proxy_logs_client_kind_created_at_idx ON proxy_logs(client_kind, created_at);');
-  execSqliteLegacyCompat('CREATE INDEX IF NOT EXISTS proxy_logs_downstream_path_created_at_idx ON proxy_logs(downstream_path, created_at);');
+  execSqliteStatement('CREATE INDEX IF NOT EXISTS proxy_logs_client_kind_created_at_idx ON proxy_logs(client_kind, created_at);');
+  execSqliteStatement('CREATE INDEX IF NOT EXISTS proxy_logs_downstream_path_created_at_idx ON proxy_logs(downstream_path, created_at);');
 
   proxyLogClientKindColumnAvailable = true;
   proxyLogClientSessionIdColumnAvailable = true;

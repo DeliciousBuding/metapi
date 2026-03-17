@@ -73,7 +73,13 @@ vi.mock('../../db/index.js', () => ({
   db: {
     insert: (arg: any) => dbInsertMock(arg),
   },
+  hasProxyLogBillingDetailsColumn: async () => false,
   hasProxyLogDownstreamApiKeyIdColumn: async () => false,
+  hasProxyLogClientKindColumn: async () => false,
+  hasProxyLogClientSessionIdColumn: async () => false,
+  hasProxyLogClientTraceHintColumn: async () => false,
+  hasProxyLogDownstreamPathColumn: async () => false,
+  hasProxyLogUpstreamPathColumn: async () => false,
   schema: {
     proxyLogs: {},
   },
