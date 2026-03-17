@@ -186,7 +186,7 @@ describe('ProxyLogs server-driven page', () => {
 
       const headers = collectHeaderLabels(root!.root);
       const timeIndex = headers.indexOf('时间');
-      const appIndex = headers.indexOf('应用');
+      const appIndex = headers.indexOf('客户端');
       const modelIndex = headers.indexOf('模型');
       expect(timeIndex).toBeGreaterThanOrEqual(0);
       expect(appIndex).toBeGreaterThanOrEqual(0);

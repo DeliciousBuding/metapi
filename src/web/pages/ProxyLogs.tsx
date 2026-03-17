@@ -48,7 +48,7 @@ type ProxyLogClientKindFilter =
   | 'opencode'
   | 'openclaw';
 const CLIENT_KIND_FILTER_OPTIONS: Array<{ value: ProxyLogClientKindFilter; label: string }> = [
-  { value: 'all', label: '全部应用' },
+  { value: 'all', label: '全部客户端' },
   { value: 'codex', label: 'Codex' },
   { value: 'claude_code', label: 'Claude Code' },
   { value: 'gemini_cli', label: 'Gemini CLI' },
@@ -236,7 +236,7 @@ function resolveClientIconHint(clientKind: string | null | undefined): string | 
   if (normalized === 'openwebui') return 'openwebui';
   if (normalized === 'opencode') return 'opencode';
   if (normalized === 'openclaw') return 'openclaw-color';
-  return normalized;
+  return null;
 }
 
 function renderClientKindBadge(clientKind: string | null | undefined, sessionId?: string | null) {
@@ -275,6 +275,58 @@ function renderClientKindBadge(clientKind: string | null | undefined, sessionId?
         </span>
       ) : null}
     </span>
+  );
+}
+
+type ClientEvidence = {
+  kind: string;
+  kindSource: string;
+  sessionId: string;
+  sessionSource: string;
+  traceHint: string;
+};
+
+function buildClientEvidence(log: ProxyLogRenderItem, pathMeta: ReturnType<typeof parseProxyLogPathMeta>): ClientEvidence {
+  const kindFromLog = (log.clientKind || '').trim();
+  const kindFromPath = (pathMeta.clientKind || '').trim();
+  const sessionFromLog = (log.clientSessionId || '').trim();
+  const sessionFromPath = (pathMeta.sessionId || '').trim();
+  const traceHint = (log.clientTraceHint || '').trim();
+
+  return {
+    kind: kindFromLog || kindFromPath,
+    kindSource: kindFromLog ? '结构化字段' : (kindFromPath ? '日志前缀解析' : '未记录'),
+    sessionId: sessionFromLog || sessionFromPath,
+    sessionSource: sessionFromLog ? '结构化字段' : (sessionFromPath ? '日志前缀解析' : ''),
+    traceHint,
+  };
+}
+
+function renderClientEvidenceLines(evidence: ClientEvidence) {
+  const kindLabel = evidence.kind ? formatClientKindLabel(evidence.kind) : '未识别';
+  const kindSuffix = evidence.kind ? (evidence.kindSource ? `（${evidence.kindSource}）` : '') : '';
+  const sessionSuffix = evidence.sessionId && evidence.sessionSource ? `（${evidence.sessionSource}）` : '';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span>
+        客户端: <strong style={{ color: 'var(--color-text-primary)' }}>{kindLabel}</strong>
+        {kindSuffix}
+      </span>
+      <span>
+        会话: {evidence.sessionId ? (
+          <>
+            <code style={{ fontFamily: 'var(--font-mono)' }}>{evidence.sessionId}</code>
+            {sessionSuffix}
+          </>
+        ) : '未记录'}
+      </span>
+      {evidence.traceHint ? (
+        <span>
+          Trace: <code style={{ fontFamily: 'var(--font-mono)' }}>{evidence.traceHint}</code>
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -456,7 +508,7 @@ export default function ProxyLogs() {
     return siteOptions.find((option) => option.value === String(siteFilter))?.label || `站点 #${siteFilter}`;
   }, [siteFilter, siteOptions]);
   const activeClientKindLabel = useMemo(() => (
-    CLIENT_KIND_FILTER_OPTIONS.find((option) => option.value === clientKindFilter)?.label || '全部应用'
+    CLIENT_KIND_FILTER_OPTIONS.find((option) => option.value === clientKindFilter)?.label || '全部客户端'
   ), [clientKindFilter]);
 
   const load = useCallback(async (silent = false) => {
@@ -593,7 +645,7 @@ export default function ProxyLogs() {
             value: option.value,
             label: option.label,
           }))}
-          placeholder="全部应用"
+          placeholder="全部客户端"
         />
       </div>
       <label className="proxy-logs-time-field">
@@ -742,8 +794,9 @@ export default function ProxyLogs() {
               const detail = detailState?.data;
               const detailLog: ProxyLogRenderItem = detail ? { ...log, ...detail } : log;
               const pathMeta = parseProxyLogPathMeta(detailLog.errorMessage);
-              const resolvedClientKind = (detailLog.clientKind || pathMeta.clientKind || '').trim();
-              const resolvedSessionId = (detailLog.clientSessionId || detailLog.clientTraceHint || pathMeta.sessionId || '').trim();
+              const clientEvidence = buildClientEvidence(detailLog, pathMeta);
+              const resolvedClientKind = clientEvidence.kind;
+              const resolvedSessionId = (clientEvidence.sessionId || clientEvidence.traceHint || '').trim();
               const billingDetailSummary = detail ? formatBillingDetailSummary(detailLog) : null;
               const billingProcessLines = detail ? buildBillingProcessLines(detailLog) : [];
               const downstreamKeySummary = renderDownstreamKeySummary(detailLog);
@@ -763,7 +816,7 @@ export default function ProxyLogs() {
                   <MobileField label="时间" value={formatDateTimeLocal(log.createdAt)} />
                   <MobileField label="站点" value={log.siteName || '-'} />
                   <MobileField
-                    label="应用"
+                    label="客户端"
                     value={resolvedClientKind ? renderClientKindBadge(resolvedClientKind) : '未识别'}
                   />
                   {resolvedSessionId ? <MobileField label="会话" value={resolvedSessionId} /> : null}
@@ -782,6 +835,7 @@ export default function ProxyLogs() {
                       {detailState?.error && <div style={{ color: 'var(--color-danger)' }}>{detailState.error}</div>}
                       {billingDetailSummary && <div style={{ color: 'var(--color-text-muted)' }}>{billingDetailSummary}</div>}
                       {downstreamKeyDetailSummary && <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeyDetailSummary}</div>}
+                      <MobileField label="识别线索" value={renderClientEvidenceLines(clientEvidence)} />
                       {billingProcessLines.length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                           {billingProcessLines.map((line, index) => (
@@ -826,7 +880,7 @@ export default function ProxyLogs() {
               <tr>
                 <th />
                 <th>时间</th>
-                <th>应用</th>
+                <th>客户端</th>
                 <th>模型</th>
                 <th>站点</th>
                 <th>{tr('状态')}</th>
@@ -843,8 +897,9 @@ export default function ProxyLogs() {
                 const detail = detailState?.data;
                 const detailLog: ProxyLogRenderItem = detail ? { ...log, ...detail } : log;
                 const pathMeta = parseProxyLogPathMeta(detailLog.errorMessage);
-                const resolvedClientKind = (detailLog.clientKind || pathMeta.clientKind || '').trim();
-                const resolvedSessionId = (detailLog.clientSessionId || detailLog.clientTraceHint || pathMeta.sessionId || '').trim();
+                const clientEvidence = buildClientEvidence(detailLog, pathMeta);
+                const resolvedClientKind = clientEvidence.kind;
+                const resolvedSessionId = (clientEvidence.sessionId || clientEvidence.traceHint || '').trim();
                 const billingDetailSummary = detail ? formatBillingDetailSummary(detailLog) : null;
                 const billingProcessLines = detail ? buildBillingProcessLines(detailLog) : [];
                 const downstreamKeySummary = renderDownstreamKeySummary(detailLog);
@@ -984,6 +1039,11 @@ export default function ProxyLogs() {
                                       <div style={{ color: 'var(--color-text-muted)' }}>{downstreamKeyDetailSummary}</div>
                                     )}
                                   </div>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <span style={{ fontWeight: 600, color: 'var(--color-info)', flexShrink: 0 }}>识别线索</span>
+                                  {renderClientEvidenceLines(clientEvidence)}
                                 </div>
 
                                 {detailLog.billingDetails && detailLog.billingDetails.usage.cacheReadTokens > 0 && (
