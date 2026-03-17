@@ -73,9 +73,9 @@ export function isCodexResponsesSurface(headers?: Record<string, unknown>): bool
 
 const claudeCodeUserIdPattern = /^user_[0-9a-f]{64}_account__session_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const claudeCodeBetaPattern = /(?:^|,)\s*claude-code-\d{8}(?:\s*,|$)/i;
-const codexOriginators = new Set(['codex_cli_rs', 'codex_exec', 'codex_cli']);
-const codexUserAgentTokens = ['codex_exec', 'codex-cli', 'codex_cli'];
-const geminiCliUserAgentPattern = /^geminicli\//i;
+const codexOriginators = new Set(['codex_cli_rs', 'codex_exec', 'codex_cli', 'codex_vscode']);
+const codexUserAgentTokens = ['codex_exec', 'codex-cli', 'codex_cli', 'codex_vscode'];
+const geminiCliUserAgentPattern = /^geminicli(?:-[a-z0-9._-]+)?\//i;
 const cursorUserAgentPattern = /(?:^|[\s(])cursor(?:\/|[-_ ]agent)/i;
 const opencodeUserAgentPattern = /(?:^|[\s(])opencode(?:\/|[-_ ])/i;
 const openclawUserAgentPattern = /(?:^|[\s(])openclaw(?:\/|[-_ ])/i;
@@ -114,6 +114,7 @@ function hasCodexHeaderSignal(headers?: Record<string, unknown>): boolean {
   if (!headers) return false;
   const originator = getHeaderValue(headers, 'originator');
   if (originator && codexOriginators.has(originator.toLowerCase())) return true;
+  if (originator && originator.toLowerCase().startsWith('codex ')) return true;
   const ua = getHeaderValue(headers, 'user-agent');
   if (ua && codexUserAgentTokens.some((token) => ua.toLowerCase().includes(token))) return true;
   return false;
@@ -137,10 +138,21 @@ function hasCursorHeaderSignal(headers?: Record<string, unknown>): boolean {
 
 function hasOpencodeHeaderSignal(headers?: Record<string, unknown>): boolean {
   if (!headers) return false;
+  const originator = getHeaderValue(headers, 'originator');
+  if (originator && originator.toLowerCase() === 'opencode') return true;
   if (getHeaderValue(headers, 'x-opencode-directory')) return true;
   if (getHeaderValue(headers, 'x-opencode-workspace')) return true;
+  if (getHeaderValue(headers, 'x-opencode-project')) return true;
+  if (getHeaderValue(headers, 'x-opencode-session')) return true;
+  if (getHeaderValue(headers, 'x-opencode-request')) return true;
+  if (getHeaderValue(headers, 'x-opencode-client')) return true;
   const ua = getHeaderValue(headers, 'user-agent');
   if (ua && opencodeUserAgentPattern.test(ua)) return true;
+  const referer = getHeaderValue(headers, 'http-referer');
+  const title = getHeaderValue(headers, 'x-title');
+  if (referer && referer.toLowerCase().includes('opencode.ai') && title?.toLowerCase() === 'opencode') {
+    return true;
+  }
   return false;
 }
 

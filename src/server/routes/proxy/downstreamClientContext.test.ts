@@ -73,6 +73,26 @@ describe('detectDownstreamClientContext', () => {
     });
   });
 
+  it('recognizes Codex by originator variants used by official clients', () => {
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        originator: 'codex_vscode',
+      },
+    })).toEqual({
+      clientKind: 'codex',
+    });
+
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        originator: 'Codex MCP',
+      },
+    })).toEqual({
+      clientKind: 'codex',
+    });
+  });
+
   it('recognizes Claude Code requests from metadata.user_id without mutating the body', () => {
     const body = {
       model: 'claude-opus-4-6',
@@ -122,10 +142,38 @@ describe('detectDownstreamClientContext', () => {
     expect(detectDownstreamClientContext({
       downstreamPath: '/v1/chat/completions',
       headers: {
+        'user-agent': 'GeminiCLI-vscode/0.1.7/gemini-2.0-flash (darwin; arm64; ide)',
+      },
+    })).toEqual({
+      clientKind: 'gemini_cli',
+    });
+
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
         'x-cursor-client-version': '1.0.0',
       },
     })).toEqual({
       clientKind: 'cursor',
+    });
+
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'x-opencode-session': 'sess_123',
+      },
+    })).toEqual({
+      clientKind: 'opencode',
+    });
+
+    expect(detectDownstreamClientContext({
+      downstreamPath: '/v1/chat/completions',
+      headers: {
+        'http-referer': 'https://opencode.ai/playground',
+        'x-title': 'opencode',
+      },
+    })).toEqual({
+      clientKind: 'opencode',
     });
 
     expect(detectDownstreamClientContext({
