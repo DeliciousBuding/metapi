@@ -44,8 +44,6 @@ type ProxyLogClientKindFilter =
   | 'kilocode'
   | 'copilot_cli'
   | 'cherrystudio'
-  | 'chatbox'
-  | 'aider'
   | 'openwebui'
   | 'opencode'
   | 'openclaw';
@@ -59,8 +57,6 @@ const CLIENT_KIND_FILTER_OPTIONS: Array<{ value: ProxyLogClientKindFilter; label
   { value: 'kilocode', label: 'KiloCode' },
   { value: 'copilot_cli', label: 'Copilot CLI' },
   { value: 'cherrystudio', label: 'Cherry Studio' },
-  { value: 'chatbox', label: 'Chatbox' },
-  { value: 'aider', label: 'Aider' },
   { value: 'openwebui', label: 'Open WebUI' },
   { value: 'opencode', label: 'Opencode' },
   { value: 'openclaw', label: 'OpenClaw' },
@@ -200,8 +196,6 @@ function normalizeRouteClientKind(raw: string | null): ProxyLogClientKindFilter 
   if (normalized === 'kilocode') return 'kilocode';
   if (normalized === 'copilot_cli') return 'copilot_cli';
   if (normalized === 'cherrystudio') return 'cherrystudio';
-  if (normalized === 'chatbox') return 'chatbox';
-  if (normalized === 'aider') return 'aider';
   if (normalized === 'openwebui') return 'openwebui';
   if (normalized === 'opencode') return 'opencode';
   if (normalized === 'openclaw') return 'openclaw';
@@ -218,8 +212,6 @@ function formatClientKindLabel(clientKind: string | null | undefined): string {
   if (normalized === 'kilocode') return 'KiloCode';
   if (normalized === 'copilot_cli') return 'Copilot CLI';
   if (normalized === 'cherrystudio') return 'Cherry Studio';
-  if (normalized === 'chatbox') return 'Chatbox';
-  if (normalized === 'aider') return 'Aider';
   if (normalized === 'openwebui') return 'Open WebUI';
   if (normalized === 'opencode') return 'Opencode';
   if (normalized === 'openclaw') return 'OpenClaw';
@@ -237,8 +229,6 @@ function resolveClientIconHint(clientKind: string | null | undefined): string | 
   if (normalized === 'kilocode') return 'kilocode';
   if (normalized === 'copilot_cli') return 'githubcopilot';
   if (normalized === 'cherrystudio') return 'cherrystudio';
-  if (normalized === 'chatbox') return null;
-  if (normalized === 'aider') return null;
   if (normalized === 'openwebui') return 'openwebui';
   if (normalized === 'opencode') return 'opencode';
   if (normalized === 'openclaw') return 'openclaw';

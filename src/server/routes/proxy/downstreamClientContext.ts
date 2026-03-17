@@ -10,8 +10,6 @@ export type DownstreamClientKind =
   | 'kilocode'
   | 'copilot_cli'
   | 'cherrystudio'
-  | 'chatbox'
-  | 'aider'
   | 'openwebui'
   | 'opencode'
   | 'openclaw';
@@ -89,7 +87,6 @@ function pickDebugHeaders(headers?: Record<string, unknown>): Record<string, str
     'editor-version',
     'editor-plugin-version',
     'copilot-vision-request',
-    'chatbox-session-id',
     'x-openwebui-user-name',
     'x-openwebui-user-id',
     'x-openwebui-user-email',
@@ -210,8 +207,6 @@ const clineUserAgentPattern = /(?:^|[\s(])cline\//i;
 const kilocodeUserAgentPattern = /opencode-kilo-provider/i;
 const copilotUserAgentPattern = /githubcopilotchat\//i;
 const cherryStudioUserAgentPattern = /cherry(?:ai|[-_ ]studio)/i;
-const chatboxTitlePattern = /chatbox\s*ai/i;
-const aiderTitlePattern = /aider/i;
 const openWebUiTitlePattern = /open\s*webui/i;
 const cursorUserAgentPattern = /(?:^|[\s(])cursor(?:\/|[-_ ]agent)/i;
 const opencodeUserAgentPattern = /(?:^|[\s(])opencode(?:\/|[-_ ])/i;
@@ -338,25 +333,6 @@ function hasOpenclawHeaderSignal(headers?: Record<string, unknown>): boolean {
   return false;
 }
 
-function hasChatboxHeaderSignal(headers?: Record<string, unknown>): boolean {
-  if (!headers) return false;
-  if (getHeaderValue(headers, 'chatbox-session-id')) return true;
-  const referer = getHeaderValue(headers, 'http-referer');
-  if (referer && referer.toLowerCase().includes('chatboxai.app')) return true;
-  const title = getHeaderValue(headers, 'x-title');
-  if (title && chatboxTitlePattern.test(title)) return true;
-  return false;
-}
-
-function hasAiderHeaderSignal(headers?: Record<string, unknown>): boolean {
-  if (!headers) return false;
-  const referer = getHeaderValue(headers, 'http-referer');
-  if (referer && referer.toLowerCase().includes('aider.chat')) return true;
-  const title = getHeaderValue(headers, 'x-title');
-  if (title && aiderTitlePattern.test(title)) return true;
-  return false;
-}
-
 function hasOpenWebUiHeaderSignal(headers?: Record<string, unknown>): boolean {
   if (!headers) return false;
   const openWebUiHeaders = [
@@ -435,22 +411,6 @@ export function detectDownstreamClientContext(input: {
 
   if (hasKilocodeHeaderSignal(input.headers)) {
     return { clientKind: 'kilocode' };
-  }
-
-  if (hasChatboxHeaderSignal(input.headers)) {
-    const sessionId = getHeaderValue(input.headers, 'chatbox-session-id');
-    if (sessionId) {
-      return {
-        clientKind: 'chatbox',
-        sessionId,
-        traceHint: sessionId,
-      };
-    }
-    return { clientKind: 'chatbox' };
-  }
-
-  if (hasAiderHeaderSignal(input.headers)) {
-    return { clientKind: 'aider' };
   }
 
   if (hasOpenWebUiHeaderSignal(input.headers)) {
