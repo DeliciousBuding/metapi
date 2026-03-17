@@ -808,20 +808,33 @@ export default function ProxyLogs() {
             })}
           </div>
         ) : (
-          <table className="data-table" style={{ display: 'inline-table', tableLayout: 'fixed', width: 'max-content' }}>
+          <table className="data-table" style={{ width: '100%', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '2%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '8%' }} />
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ width: 28 }} />
-                <th style={{ width: 150 }}>时间</th>
-                <th style={{ width: 140 }}>应用</th>
-                <th style={{ width: 220 }}>模型</th>
-                <th style={{ width: 140 }}>站点</th>
-                <th style={{ width: 88 }}>{tr('状态')}</th>
-                <th style={{ width: 80, textAlign: 'center' }}>用时</th>
-                <th style={{ width: 70, textAlign: 'right' }}>输入</th>
-                <th style={{ width: 70, textAlign: 'right' }}>输出</th>
-                <th style={{ width: 90, textAlign: 'right' }}>花费</th>
-                <th style={{ width: 70, textAlign: 'center' }}>重试</th>
+                <th />
+                <th>时间</th>
+                <th>应用</th>
+                <th>模型</th>
+                <th>站点</th>
+                <th>{tr('状态')}</th>
+                <th style={{ textAlign: 'center' }}>用时</th>
+                <th style={{ textAlign: 'right' }}>输入</th>
+                <th style={{ textAlign: 'right' }}>输出</th>
+                <th style={{ textAlign: 'right' }}>花费</th>
+                <th style={{ textAlign: 'center' }}>重试</th>
               </tr>
             </thead>
             <tbody>
