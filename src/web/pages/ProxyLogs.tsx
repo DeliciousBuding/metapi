@@ -875,8 +875,10 @@ export default function ProxyLogs() {
                           ) : null}
                         </div>
                       </td>
-                      <td style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                        {log.siteName || '-'}
+                      <td>
+                        <span className="badge badge-muted" style={{ fontSize: 11 }}>
+                          {log.siteName || '-'}
+                        </span>
                       </td>
                       <td>
                         <span className={`badge ${log.status === 'success' ? 'badge-success' : 'badge-error'}`} style={{ fontSize: 11, fontWeight: 600 }}>
