@@ -945,11 +945,6 @@ export default function ProxyLogs() {
                                           ，账号: <strong style={{ color: 'var(--color-text-primary)' }}>{detailLog.username || '未知账号'}</strong>
                                         </>
                                       )}
-                                      {resolvedClientKind && (
-                                        <>
-                                          ，应用: <strong style={{ color: 'var(--color-text-primary)' }}>{formatClientKindLabel(resolvedClientKind)}</strong>
-                                        </>
-                                      )}
                                       {resolvedSessionId && (
                                         <>
                                           ，会话: <strong style={{ color: 'var(--color-text-primary)' }}>{resolvedSessionId}</strong>
