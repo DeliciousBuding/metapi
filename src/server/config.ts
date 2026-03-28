@@ -86,6 +86,8 @@ export function buildConfig(env: NodeJS.ProcessEnv) {
       balanceWeight: parseNumber(env.BALANCE_WEIGHT, 0.3),
       usageWeight: parseNumber(env.USAGE_WEIGHT, 0.3),
     },
+    autoPriorityOrchestrationEnabled: parseBoolean(env.AUTO_PRIORITY_ORCHESTRATION_ENABLED, false),
+    priorityOrchestrationCron: env.PRIORITY_ORCHESTRATION_CRON || '0 2 * * *',
   };
 }
 
