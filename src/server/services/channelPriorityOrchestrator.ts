@@ -48,17 +48,17 @@ export class ChannelPriorityOrchestrator {
     // Success rate (weight: 40%)
     const successRate = totalRequests > 0 ? metrics.successCount / totalRequests : 0;
 
-    // Average latency (weight: 30%) - normalized to 0-1
-    // Assuming reasonable latency range: 0ms - 5000ms
+    // Average latency (weight: 20%) - normalized to 0-1
+    // Assuming reasonable latency range: 0ms - 10000ms
     const avgLatency = metrics.successCount > 0 ? metrics.totalLatencyMs / metrics.successCount : 0;
-    const latencyScore = Math.max(0, 1 - avgLatency / 5000);
+    const latencyScore = Math.max(0, 1 - avgLatency / 10000);
 
-    // Average cost (weight: 20%) - normalized to 0-1
-    // Assuming reasonable cost range: 0 - 1 per request
+    // Average cost (weight: 15%) - normalized to 0-1
+    // Assuming reasonable cost range: 0 - 2 per request
     const avgCost = metrics.successCount > 0 ? metrics.totalCost / metrics.successCount : 0;
-    const costScore = Math.max(0, 1 - avgCost);
+    const costScore = Math.max(0, 1 - avgCost / 2);
 
-    // Stability (weight: 10%)
+    // Stability (weight: 15%)
     const nowMs = Date.now();
     let stabilityScore = 1;
 
@@ -89,14 +89,27 @@ export class ChannelPriorityOrchestrator {
       stabilityScore *= 0.8;
     }
 
-    // Composite score
-    // Reduce the weight of latency and cost when success rate is low
-    const effectiveLatencyWeight = successRate * 0.3;
-    const effectiveCostWeight = successRate * 0.2;
-    const effectiveStabilityWeight = 0.1;
-    const successWeight = 1 - effectiveLatencyWeight - effectiveCostWeight - effectiveStabilityWeight;
+    // Composite score with stability cap
+    // Success rate (weight: 50%) - most important factor
+    // Latency (weight: 20%)
+    // Cost (weight: 15%)
+    // Stability (weight: 15%)
 
-    const score = successRate * successWeight + latencyScore * effectiveLatencyWeight + costScore * effectiveCostWeight + stabilityScore * effectiveStabilityWeight;
+    // Stability problems severely limit the maximum score
+    // A channel with recent failures or high failure rate cannot be trusted
+    let score = successRate * 0.5 + latencyScore * 0.2 + costScore * 0.15 + stabilityScore * 0.15;
+
+    // Cap the score based on stability and failure rate
+    if (failureRate > 0.3) {
+      // Very high failure rate: severe penalty
+      score = Math.min(score, 0.35);
+    } else if (stabilityScore <= 0.5) {
+      // Recent failure within 5 minutes
+      score = Math.min(score, 0.6);
+    } else if (stabilityScore <= 0.7) {
+      // Recent failure within 30 minutes
+      score = Math.min(score, 0.75);
+    }
 
     return {
       channelId: metrics.channelId,
