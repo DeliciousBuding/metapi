@@ -2,15 +2,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChannelPriorityOrchestrator, type ChannelPerformanceMetrics } from './channelPriorityOrchestrator.js';
+import type { ChannelPerformanceMetrics } from './channelPriorityOrchestrator.js';
 
 type DbModule = typeof import('../db/index.js');
-type SchemaModule = typeof import('../db/schema.js');
+type OrchestratorModule = typeof import('./channelPriorityOrchestrator.js');
 
 describe('ChannelPriorityOrchestrator', () => {
   let db: DbModule['db'];
-  let schema: SchemaModule['schema'];
-  let orchestrator: ChannelPriorityOrchestrator;
+  let schema: DbModule['schema'];
+  let orchestrator: OrchestratorModule['ChannelPriorityOrchestrator'];
+  let calculatePerformanceScore: OrchestratorModule['channelPriorityOrchestrator']['calculatePerformanceScore'];
   let dataDir = '';
 
   beforeAll(async () => {
@@ -19,10 +20,11 @@ describe('ChannelPriorityOrchestrator', () => {
 
     await import('../db/migrate.js');
     const dbModule = await import('../db/index.js');
-    const schemaModule = await import('../db/schema.js');
+    const orchestratorModule = await import('./channelPriorityOrchestrator.js');
     db = dbModule.db;
-    schema = schemaModule.schema;
-    orchestrator = new ChannelPriorityOrchestrator();
+    schema = dbModule.schema;
+    orchestrator = new orchestratorModule.ChannelPriorityOrchestrator();
+    calculatePerformanceScore = orchestrator.calculatePerformanceScore.bind(orchestrator);
   });
 
   afterAll(() => {
@@ -45,7 +47,7 @@ describe('ChannelPriorityOrchestrator', () => {
         enabled: true,
       };
 
-      const score = orchestrator.calculatePerformanceScore(metrics);
+      const score = calculatePerformanceScore(metrics);
       expect(score.score).toBeGreaterThan(0.8);
       expect(score.successRate).toBe(1);
       expect(score.avgLatency).toBe(50);
@@ -67,7 +69,7 @@ describe('ChannelPriorityOrchestrator', () => {
         enabled: true,
       };
 
-      const score = orchestrator.calculatePerformanceScore(metrics);
+      const score = calculatePerformanceScore(metrics);
       expect(score.score).toBeLessThan(0.5);
       expect(score.successRate).toBe(0.5);
       expect(score.stability).toBeLessThan(1);
@@ -89,7 +91,7 @@ describe('ChannelPriorityOrchestrator', () => {
         enabled: true,
       };
 
-      const score = orchestrator.calculatePerformanceScore(metrics);
+      const score = calculatePerformanceScore(metrics);
       expect(score.stability).toBe(0.5);
       expect(score.score).toBeLessThan(0.8);
     });
@@ -109,7 +111,7 @@ describe('ChannelPriorityOrchestrator', () => {
         enabled: true,
       };
 
-      const score = orchestrator.calculatePerformanceScore(metrics);
+      const score = calculatePerformanceScore(metrics);
       expect(score.successRate).toBe(0);
       expect(score.avgLatency).toBe(0);
       expect(score.avgCost).toBe(0);
@@ -170,6 +172,7 @@ describe('ChannelPriorityOrchestrator', () => {
       const account = await db.insert(schema.accounts).values({
         siteId: site.id,
         username: 'test-user',
+        accessToken: 'test-access-token',
         status: 'active',
       }).returning().get();
 
