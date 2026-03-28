@@ -13,6 +13,7 @@ const { apiMock } = vi.hoisted(() => ({
     getRuntimeDatabaseConfig: vi.fn(),
     updateRuntimeSettings: vi.fn(),
     testSystemProxy: vi.fn(),
+    getModelTokenCandidates: vi.fn(),
   },
 }));
 
@@ -78,6 +79,7 @@ describe('Settings system proxy', () => {
       statusCode: 204,
       latencyMs: 321,
     });
+    apiMock.getModelTokenCandidates.mockResolvedValue({ models: {} });
   });
 
   afterEach(() => {
