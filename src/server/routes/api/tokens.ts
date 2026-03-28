@@ -1206,5 +1206,46 @@ export async function tokensRoutes(app: FastifyInstance) {
         : '已开始路由重建，请稍后查看程序日志',
     });
   });
+
+  // Orchestrate priorities for all routes
+  app.post('/api/routes/orchestrate-priorities', async (request, reply) => {
+    const { channelPriorityOrchestrator } = await import('../../services/channelPriorityOrchestrator.js');
+
+    const result = await channelPriorityOrchestrator.orchestrateChannelPriorities();
+
+    return reply.code(200).send({
+      success: true,
+      adjusted: result.adjusted.length,
+      skipped: result.skipped.length,
+      details: result,
+      message: `优先级调整完成：调整 ${result.adjusted.length} 个通道，跳过 ${result.skipped.length} 个通道`,
+    });
+  });
+
+  // Orchestrate priorities for a specific route
+  app.post<{ Params: { routeId: string } }>('/api/routes/:routeId/orchestrate-priority', async (request, reply) => {
+    const routeId = parseInt(request.params.routeId, 10);
+    if (!routeId || routeId <= 0) {
+      return reply.code(400).send({ success: false, message: '无效的路由ID' });
+    }
+
+    const route = await db.select().from(schema.tokenRoutes).where(eq(schema.tokenRoutes.id, routeId)).get();
+    if (!route) {
+      return reply.code(404).send({ success: false, message: '路由不存在' });
+    }
+
+    const { channelPriorityOrchestrator } = await import('../../services/channelPriorityOrchestrator.js');
+
+    const result = await channelPriorityOrchestrator.orchestrateChannelPriorities(routeId);
+
+    return reply.code(200).send({
+      success: true,
+      routeId,
+      adjusted: result.adjusted.length,
+      skipped: result.skipped.length,
+      details: result,
+      message: `路由 ${routeId} 优先级调整完成：调整 ${result.adjusted.length} 个通道，跳过 ${result.skipped.length} 个通道`,
+    });
+  });
 }
 
