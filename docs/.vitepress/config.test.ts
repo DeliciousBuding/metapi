@@ -44,6 +44,26 @@ const getExpectedEntry = (hoistedRelativePath: string, pnpmPattern: string) => {
 };
 
 describe('docs vitepress config', () => {
+  it('exposes the management API page in the docs sidebar', () => {
+    const sidebar = config.themeConfig?.sidebar;
+    const groups = Array.isArray(sidebar) ? sidebar : [];
+    const links = groups.flatMap((group) => (
+      group && typeof group === 'object' && 'items' in group && Array.isArray(group.items)
+        ? group.items
+        : []
+    ));
+
+    expect(
+      links.some(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          'link' in item &&
+          item.link === '/management-api',
+      ),
+    ).toBe(true);
+  });
+
   it('ships copied main-app favicon assets for docs', () => {
     expect(existsSync(resolve(repoRoot, 'docs/public/favicon.png'))).toBe(true);
     expect(existsSync(resolve(repoRoot, 'docs/public/favicon-64.png'))).toBe(true);

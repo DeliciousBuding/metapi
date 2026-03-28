@@ -75,6 +75,7 @@ export default withMermaid(
           text: '使用与运维',
           items: [
             { text: '上游接入', link: '/upstream-integration' },
+            { text: '管理 API（脚本化管理）', link: '/management-api' },
             { text: '配置说明', link: '/configuration' },
             { text: '客户端接入', link: '/client-integration' },
             { text: '运维手册', link: '/operations' },
