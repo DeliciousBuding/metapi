@@ -49,9 +49,9 @@ export class ChannelPriorityOrchestrator {
     const successRate = totalRequests > 0 ? metrics.successCount / totalRequests : 0;
 
     // Average latency (weight: 30%) - normalized to 0-1
-    // Assuming reasonable latency range: 0ms - 10000ms
+    // Assuming reasonable latency range: 0ms - 5000ms
     const avgLatency = metrics.successCount > 0 ? metrics.totalLatencyMs / metrics.successCount : 0;
-    const latencyScore = Math.max(0, 1 - avgLatency / 10000);
+    const latencyScore = Math.max(0, 1 - avgLatency / 5000);
 
     // Average cost (weight: 20%) - normalized to 0-1
     // Assuming reasonable cost range: 0 - 1 per request
@@ -90,7 +90,13 @@ export class ChannelPriorityOrchestrator {
     }
 
     // Composite score
-    const score = successRate * 0.4 + latencyScore * 0.3 + costScore * 0.2 + stabilityScore * 0.1;
+    // Reduce the weight of latency and cost when success rate is low
+    const effectiveLatencyWeight = successRate * 0.3;
+    const effectiveCostWeight = successRate * 0.2;
+    const effectiveStabilityWeight = 0.1;
+    const successWeight = 1 - effectiveLatencyWeight - effectiveCostWeight - effectiveStabilityWeight;
+
+    const score = successRate * successWeight + latencyScore * effectiveLatencyWeight + costScore * effectiveCostWeight + stabilityScore * effectiveStabilityWeight;
 
     return {
       channelId: metrics.channelId,
