@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   api,
   type OAuthConnectionInfo,
@@ -152,6 +153,7 @@ function renderGuideCard(title: string, description: string, children?: ReactNod
 }
 
 export default function OAuthManagement() {
+  const navigate = useNavigate();
   const [providers, setProviders] = useState<OAuthProviderInfo[]>([]);
   const [connections, setConnections] = useState<OAuthConnectionInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -369,6 +371,36 @@ export default function OAuthManagement() {
           <div className="page-subtitle">
             统一管理需要浏览器授权的官方上游连接。授权完成后，可把 Codex、Claude、Gemini CLI 等 CLI / Web 登录态接入 metapi，继续通过统一路由、下游密钥、模型操练场和第三方客户端转发使用。
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 20, marginBottom: 16, display: 'grid', gap: 14 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>连接后怎么开始用</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.7 }}>
+            OAuth 连接本身不会直接接收下游请求。metapi 会把已连接账号挂到路由里的 channel 上，实际调用时命中的是 route / channel，而不是这里的连接记录。
+          </div>
+        </div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          {renderGuideCard(
+            '下一步检查',
+            '连接完成后，先去路由页确认是否已经生成通道；如果连接记录显示 0 条路由，说明这个账号还没有进入可用 route。',
+          )}
+          {renderGuideCard(
+            '常见后续操作',
+            '路由页用于确认 route / channel 是否可用；账号页用于检查账号状态和模型同步；模型操练场用于直接验证请求是否已经能走通。',
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/routes')}>
+            去路由页
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={() => navigate('/accounts')}>
+            去账号页
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={() => navigate('/playground')}>
+            去模型操练场
+          </button>
         </div>
       </div>
 
@@ -630,6 +662,11 @@ export default function OAuthManagement() {
                     <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
                       {resolveConnectionStatusLabel(connection.status)} · {connection.routeChannelCount || 0} 条路由
                     </div>
+                    {(connection.routeChannelCount || 0) === 0 && (
+                      <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 6, lineHeight: 1.6 }}>
+                        当前还没有可用路由。如果这里显示 0 条路由，先去路由页确认是否已经生成通道；如果仍然没有，再检查账号状态、模型同步结果或按当前配置重建路由。
+                      </div>
+                    )}
                     {connection.lastModelSyncAt && (
                       <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
                         最近同步: {connection.lastModelSyncAt}

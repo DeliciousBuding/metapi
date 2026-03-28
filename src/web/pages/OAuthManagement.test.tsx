@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, create } from 'react-test-renderer';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ToastProvider } from '../components/Toast.js';
 import OAuthManagement from './OAuthManagement.js';
 
@@ -31,6 +31,11 @@ function collectText(node: any): string {
     if (typeof child === 'string') return child;
     return collectText(child);
   }).join('');
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>;
 }
 
 async function flushMicrotasks() {
@@ -1092,6 +1097,154 @@ describe('OAuthManagement page', () => {
       expect(apiMock.getOAuthConnections).toHaveBeenCalledTimes(2);
       expect(collectText(root!.root)).toContain('额度信息已刷新');
       expect(collectText(root!.root)).toContain('2026-03-18T01:00:00.000Z');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('explains how oauth connections become usable routes and highlights zero-route next steps', async () => {
+    apiMock.getOAuthProviders.mockResolvedValue({
+      providers: [
+        {
+          provider: 'codex',
+          label: 'Codex',
+          platform: 'codex',
+          enabled: true,
+          loginType: 'oauth',
+          requiresProjectId: false,
+          supportsDirectAccountRouting: true,
+          supportsCloudValidation: true,
+          supportsNativeProxy: true,
+        },
+      ],
+    });
+    apiMock.getOAuthConnections.mockResolvedValue({
+      items: [
+        {
+          accountId: 21,
+          provider: 'codex',
+          email: 'codex-zero-route@example.com',
+          planType: 'plus',
+          modelCount: 2,
+          modelsPreview: ['gpt-5', 'gpt-5-mini'],
+          status: 'healthy',
+          routeChannelCount: 0,
+        },
+      ],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+
+    let root!: WebTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <ToastProvider>
+            <MemoryRouter initialEntries={['/oauth']}>
+              <OAuthManagement />
+            </MemoryRouter>
+          </ToastProvider>,
+        );
+      });
+      await vi.waitFor(async () => {
+        await flushMicrotasks();
+        const text = collectText(root!.root);
+        expect(text).toContain('连接后怎么开始用');
+        expect(text).toContain('OAuth 连接本身不会直接接收下游请求');
+        expect(text).toContain('去路由页确认是否已经生成通道');
+        expect(text).toContain('当前还没有可用路由');
+        expect(text).toContain('如果这里显示 0 条路由');
+      });
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('offers direct navigation to routes, accounts, and playground after oauth connection', async () => {
+    apiMock.getOAuthProviders.mockResolvedValue({
+      providers: [
+        {
+          provider: 'codex',
+          label: 'Codex',
+          platform: 'codex',
+          enabled: true,
+          loginType: 'oauth',
+          requiresProjectId: false,
+          supportsDirectAccountRouting: true,
+          supportsCloudValidation: true,
+          supportsNativeProxy: true,
+        },
+      ],
+    });
+    apiMock.getOAuthConnections.mockResolvedValue({
+      items: [
+        {
+          accountId: 21,
+          provider: 'codex',
+          email: 'codex-user@example.com',
+          planType: 'plus',
+          modelCount: 2,
+          modelsPreview: ['gpt-5', 'gpt-5-mini'],
+          status: 'healthy',
+          routeChannelCount: 0,
+        },
+      ],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+
+    let root!: WebTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <ToastProvider>
+            <MemoryRouter initialEntries={['/oauth']}>
+              <>
+                <OAuthManagement />
+                <LocationProbe />
+              </>
+            </MemoryRouter>
+          </ToastProvider>,
+        );
+      });
+      await vi.waitFor(async () => {
+        await flushMicrotasks();
+      });
+
+      const routesButton = root!.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).includes('去路由页')
+      ));
+
+      await act(async () => {
+        routesButton.props.onClick();
+      });
+      expect(collectText(root!.root)).toContain('/routes');
+
+      const accountsButton = root!.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).includes('去账号页')
+      ));
+
+      await act(async () => {
+        accountsButton.props.onClick();
+      });
+      expect(collectText(root!.root)).toContain('/accounts');
+
+      const playgroundButton = root!.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).includes('去模型操练场')
+      ));
+
+      await act(async () => {
+        playgroundButton.props.onClick();
+      });
+      expect(collectText(root!.root)).toContain('/playground');
     } finally {
       root?.unmount();
     }
