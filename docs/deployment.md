@@ -298,6 +298,15 @@ your-domain.com {
 
 ## 升级
 
+如果你是在单台 Docker / Docker Compose 生产实例上做正式升级，尤其涉及：
+
+- canary 槽位
+- 反向代理灰度分流
+- SQLite 热备副本
+- 回滚纪律
+
+请优先按 [Metapi Upgrade SOP](./metapi-upgrade-sop.md) 执行，而不是只做下面这组通用命令。
+
 ```bash
 # 拉取最新镜像
 docker compose pull

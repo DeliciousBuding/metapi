@@ -31,6 +31,7 @@ npm run docs:build
 | 上游平台选择与接法 | [上游接入](./upstream-integration.md) | 平台支持范围、官方预设、AI 请求地址池、自动识别规则变化时 |
 | Provider OAuth 授权 | [OAuth 管理](./oauth.md) | 支持的 OAuth provider、授权流程、回调方式或自动重绑能力变化时 |
 | 生产部署与回滚 | [部署指南](./deployment.md) | Docker Compose、反向代理、升级回滚策略变更时 |
+| 单实例生产升级标准流程 | [Metapi Upgrade SOP](./metapi-upgrade-sop.md) | 需要做正式升级窗口、canary 验证、灰度切流和回滚演练时 |
 | K3s / Helm 高级升级面板 | [K3s 更新中心（高级）](./k3s-update-center.md) | 需要说明谁适合使用更新中心、helper 怎么配、K3s/Helm 发布链路怎么接入时 |
 | 环境变量、参数和配置项 | [配置说明](./configuration.md) | 设置页 / 通知设置 / 下游密钥这些 UI 入口变化，或仅剩 env-only 的部署级参数变化时 |
 | 客户端与工具接入 | [客户端接入](./client-integration.md) | Open WebUI、Cherry Studio、Cursor 等接入方式变化时 |
