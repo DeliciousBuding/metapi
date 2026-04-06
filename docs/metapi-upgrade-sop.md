@@ -250,6 +250,50 @@ ssh sgp1 'sudo docker logs --tail 100 metapi-canary'
 - 没有明显启动错误
 - 没有静态资源 / API 路径断裂
 
+### 8. 验 Portal token 统计链路
+
+Metapi 升级后，Portal 的 token 统计必须作为强制验收项一起检查。
+
+推荐命令：
+
+```bash
+cd D:\Code\Projects\VectorControl-Portal
+npm run check:runtime-sync -- --id hk-token-artifacts
+ssh hk 'python3 /usr/local/bin/token_artifacts.py --summary-only'
+```
+
+```bash
+ssh hk 'python3 - <<'"'"'PY'"'"'
+import json
+from pathlib import Path
+base = Path("/var/www/vectorcontrol-portal/artifacts")
+for name in [
+    "token-stats.json",
+    "token-stats-24h.json",
+    "token-history.json",
+    "token-apps.json",
+    "token-users.json",
+    "token-models.json",
+    "token-pipeline-health.json",
+]:
+    p = base / name
+    print(name, p.stat().st_mtime, p.stat().st_size)
+    json.loads(p.read_text())
+PY'
+```
+
+至少确认：
+
+- hk live builder 与仓库版本一致
+- `token_artifacts.py --summary-only` 中的 `liveDb` 指向当前生产数据目录
+- token artifacts 文件都已刷新且 JSON 可解析
+
+注意：
+
+- 对 `https://www.vectorcontrol.tech/artifacts/*.json` 的裸 `curl`/HEAD 请求，可能会被 Cloudflare challenge 成 `403`
+- 这不应单独判定为 Portal token 统计故障
+- 升级验收应优先看 hk 本地 artifacts 文件、builder summary，以及真实浏览器展示
+
 ## 最终 cutover
 
 最终 cutover 必须从独立控制面执行，且先准备回滚。
@@ -375,6 +419,13 @@ ssh sgp1 'sudo docker logs --tail 50 metapi'
 问题：
 
 - 一旦切坏，控制链也可能一起断
+
+### 5. 忽略 Portal token 统计验收
+
+问题：
+
+- Metapi `/v1/*` 正常，不代表 Portal 的 token artifacts 仍在正常刷新
+- 升级后如果 live DB 路径、snapshot push、或 hk builder 口径漂移，Portal 首页会先坏
 
 ## 关联文档
 
